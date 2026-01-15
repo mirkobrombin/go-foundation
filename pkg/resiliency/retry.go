@@ -78,3 +78,8 @@ func WithDelay(initial, max time.Duration) func(*RetryOptions) {
 		o.MaxDelay = max
 	}
 }
+
+// WithFactor sets the backoff factor.
+func WithFactor(f float64) func(*RetryOptions) {
+	return func(o *RetryOptions) { o.Factor = f }
+}

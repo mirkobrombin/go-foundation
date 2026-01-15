@@ -1,12 +1,15 @@
 package options
 
+// Option is a functional option for configuration.
+type Option[T any] func(*T)
+
 // Apply applies functional options to a config struct.
 //
 // Example:
 //
 //	cfg := &Config{}
 //	options.Apply(cfg, WithHost("localhost"))
-func Apply[T any](cfg *T, opts ...func(*T)) {
+func Apply[T any](cfg *T, opts ...Option[T]) {
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -21,7 +24,7 @@ func Apply[T any](cfg *T, opts ...func(*T)) {
 //		Build()
 type Builder[T any] struct {
 	cfg  T
-	opts []func(*T)
+	opts []Option[T]
 }
 
 // NewBuilder creates a new options builder with default config.
@@ -34,7 +37,7 @@ func NewBuilder[T any](defaults T) *Builder[T] {
 // Returns:
 //
 // The builder instance for chaining.
-func (b *Builder[T]) With(opt func(*T)) *Builder[T] {
+func (b *Builder[T]) With(opt Option[T]) *Builder[T] {
 	b.opts = append(b.opts, opt)
 	return b
 }
