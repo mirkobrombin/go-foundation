@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/mirkobrombin/go-foundation/pkg/contracts"
 	"github.com/mirkobrombin/go-foundation/pkg/tags"
 )
 
@@ -19,7 +20,7 @@ type Container struct {
 	mu        sync.RWMutex
 }
 
-var injectParser = tags.NewParser("inject", tags.WithPairDelimiter(";"), tags.WithKVSeparator(":"))
+var injectParser = tags.NewParser("inject", tags.WithPairDelimiter(";"), tags.WithKVSeparator(":"), tags.WithIncludeUntagged())
 
 // New creates an empty DI container.
 func New() *Container {
@@ -29,7 +30,9 @@ func New() *Container {
 }
 
 // Provide registers a dependency by name.
+// It automatically verifies any contracts declared via contracts.Implements.
 func (c *Container) Provide(name string, instance any) {
+	contracts.MustVerify(instance)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.providers[name] = instance
@@ -45,6 +48,20 @@ func (c *Container) Get(name string) (any, bool) {
 	defer c.mu.RUnlock()
 	v, ok := c.providers[name]
 	return v, ok
+}
+
+// ResolveAll finds all registered dependencies that implement the given interface T.
+func ResolveAll[T any](c *Container) []T {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []T
+	for _, v := range c.providers {
+		if t, ok := v.(T); ok {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // MustGet retrieves a dependency and panics if not found.

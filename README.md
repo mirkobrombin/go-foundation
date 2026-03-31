@@ -31,7 +31,7 @@ result := p.Parse("role:owner; read:admin,user")
 
 ### `pkg/di` - Dependency Injection
 
-Minimal DI container with generics support.
+Minimal DI container with generics support, contract validation, and discovery.
 
 ```go
 import "github.com/mirkobrombin/go-foundation/pkg/di"
@@ -40,6 +40,25 @@ c := di.New()
 c.Provide("db", myDB)
 
 db := di.Get[*sql.DB](c, "db")
+
+// Find all instances implementing an interface
+workers := di.ResolveAll[Worker](c)
+```
+
+### `pkg/contracts` - Explicit Interface Contracts
+
+Zero-cost markers to declare interface implementation intent, enabling IDE discovery and runtime validation.
+
+```go
+import "github.com/mirkobrombin/go-foundation/pkg/contracts"
+
+type MyService struct {
+    contracts.Implements[IService] // IDE knows this implements IService
+    db *sql.DB
+}
+
+// Validates all declared contracts via reflection
+contracts.MustVerify(&MyService{})
 ```
 
 ### `pkg/adapters` - Pluggable Backends
