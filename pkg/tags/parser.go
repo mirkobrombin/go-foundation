@@ -13,16 +13,22 @@ import (
 //	p := tags.NewParser("my-tag", tags.WithPairDelimiter(";"))
 //	data := p.Parse("key:val; option:a,b")
 type Parser struct {
-	tagName       string
-	pairDelimiter string
-	kvSeparator   string
-	valueDelim    string
-	cache         map[reflect.Type][]FieldMeta
-	mu            sync.RWMutex
+	tagName         string
+	pairDelimiter   string
+	kvSeparator     string
+	valueDelim      string
+	includeUntagged bool
+	cache           map[reflect.Type][]FieldMeta
+	mu              sync.RWMutex
 }
 
 // Option configures a Parser.
 type Option func(*Parser)
+
+// WithIncludeUntagged configures the parser to include fields even if the tag is missing.
+func WithIncludeUntagged() Option {
+	return func(p *Parser) { p.includeUntagged = true }
+}
 
 // WithPairDelimiter sets the delimiter between key:value pairs (default ";").
 func WithPairDelimiter(d string) Option {
@@ -134,15 +140,20 @@ func (p *Parser) ParseType(typ reflect.Type) []FieldMeta {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		tag := field.Tag.Get(p.tagName)
-		if tag == "" {
+		if tag == "" && !p.includeUntagged {
 			continue
+		}
+
+		var parsedTags map[string][]string
+		if tag != "" {
+			parsedTags = p.Parse(tag)
 		}
 
 		fields = append(fields, FieldMeta{
 			Name:       field.Name,
 			Index:      i,
 			Type:       field.Type,
-			Tags:       p.Parse(tag),
+			Tags:       parsedTags,
 			RawTag:     tag,
 			IsExported: field.IsExported(),
 		})
