@@ -81,3 +81,43 @@ func ParseBool(str string) (bool, error) {
 	}
 	return false, fmt.Errorf("invalid boolean value: %s", str)
 }
+
+// BindToStruct populates a struct from a map[string]string using `conf` tags or field names.
+//
+// Example:
+//
+//	type Config struct {
+//		Name  string `conf:"name"`
+//		Count int    `conf:"count"`
+//	}
+//	var cfg Config
+//	err := reflect.BindToStruct(&cfg, map[string]string{"name": "test", "count": "42"})
+func BindToStruct(dst any, src map[string]string) error {
+	val := reflect.ValueOf(dst)
+	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("reflect: dst must be a pointer to a struct")
+	}
+
+	elem := val.Elem()
+	typ := elem.Type()
+
+	for i := 0; i < elem.NumField(); i++ {
+		field := elem.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+
+		fieldType := typ.Field(i)
+		tag := fieldType.Tag.Get("conf")
+		if tag == "" {
+			tag = fieldType.Name
+		}
+
+		if v, ok := src[tag]; ok {
+			if err := Bind(field, v); err != nil {
+				return fmt.Errorf("reflect: field %s: %w", fieldType.Name, err)
+			}
+		}
+	}
+	return nil
+}

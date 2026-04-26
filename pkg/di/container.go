@@ -39,15 +39,22 @@ func (c *Container) Provide(name string, instance any) {
 }
 
 // Get retrieves a dependency by name.
+// If the provider is lazy, the factory is called on first access.
 //
 // Returns:
 //
 // The value and true if found, otherwise nil and false.
 func (c *Container) Get(name string) (any, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	v, ok := c.providers[name]
-	return v, ok
+	c.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if lp, ok := v.(*lazyProvider); ok {
+		return lp.get(), true
+	}
+	return v, true
 }
 
 // ResolveAll finds all registered dependencies that implement the given interface T.
@@ -95,7 +102,6 @@ func (c *Container) Inject(target any) {
 	}
 
 	elem := val.Elem()
-	// Optimization: global parser for inject tags
 	parser := injectParser
 	fields := parser.ParseStruct(target)
 
@@ -114,12 +120,48 @@ func (c *Container) Inject(target any) {
 		}
 
 		if dep, ok := c.providers[name]; ok {
+			if lp, ok := dep.(*lazyProvider); ok {
+				dep = lp.get()
+			}
 			depVal := reflect.ValueOf(dep)
 			if depVal.Type().AssignableTo(fieldVal.Type()) {
 				fieldVal.Set(depVal)
 			}
 		}
 	}
+}
+
+// Scope creates a child container that inherits from parent.
+// The child can override providers without affecting the parent.
+func (c *Container) Scope() *Container {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	clone := New()
+	for k, v := range c.providers {
+		clone.providers[k] = v
+	}
+	return clone
+}
+
+// ProvideLazy registers a factory that is called only on first Get.
+func (c *Container) ProvideLazy(name string, factory func() any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.providers[name] = &lazyProvider{factory: factory}
+}
+
+type lazyProvider struct {
+	once    sync.Once
+	value   any
+	factory func() any
+}
+
+func (l *lazyProvider) get() any {
+	l.once.Do(func() {
+		l.value = l.factory()
+	})
+	return l.value
 }
 
 // Clone creates a shallow copy of the container.

@@ -110,6 +110,24 @@ func (m *ShardedMap[K, V]) Compute(key K, fn func(existing V, exists bool) V) V 
 	return m.getShard(key).Compute(key, fn)
 }
 
+// Keys returns all keys across all shards.
+func (m *ShardedMap[K, V]) Keys() []K {
+	var all []K
+	for _, shard := range m.shards {
+		all = append(all, shard.Keys()...)
+	}
+	return all
+}
+
+// Values returns all values across all shards.
+func (m *ShardedMap[K, V]) Values() []V {
+	var all []V
+	for _, shard := range m.shards {
+		all = append(all, shard.Values()...)
+	}
+	return all
+}
+
 // StringHasher returns a hasher for string keys.
 func StringHasher(s string) uint64 {
 	h := fnv.New64a()

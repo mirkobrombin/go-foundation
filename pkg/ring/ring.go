@@ -69,3 +69,27 @@ func (b *Buffer[T]) Pop() (v T, ok bool) {
 	b.r = (b.r + 1) % len(b.buf)
 	return v, true
 }
+
+// Peek returns the next element without removing it. ok is false if the buffer is empty.
+func (b *Buffer[T]) Peek() (v T, ok bool) {
+	if b == nil || b.empty() {
+		return v, false
+	}
+	return b.buf[b.r], true
+}
+
+// Drain returns all elements as a slice and resets the buffer.
+func (b *Buffer[T]) Drain() []T {
+	if b == nil || b.empty() {
+		return nil
+	}
+	result := make([]T, 0, b.Len())
+	for {
+		v, ok := b.Pop()
+		if !ok {
+			break
+		}
+		result = append(result, v)
+	}
+	return result
+}

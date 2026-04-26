@@ -75,3 +75,60 @@ func (s *Set[T]) Clear() {
 	defer s.mu.Unlock()
 	s.items = make(map[T]struct{})
 }
+
+// Union returns a new set with elements from both sets.
+func (s *Set[T]) Union(other *Set[T]) *Set[T] {
+	result := NewSet[T]()
+	s.mu.RLock()
+	for k := range s.items {
+		result.items[k] = struct{}{}
+	}
+	s.mu.RUnlock()
+	other.mu.RLock()
+	for k := range other.items {
+		result.items[k] = struct{}{}
+	}
+	other.mu.RUnlock()
+	return result
+}
+
+// Intersection returns a new set with elements common to both sets.
+func (s *Set[T]) Intersection(other *Set[T]) *Set[T] {
+	result := NewSet[T]()
+	s.mu.RLock()
+	other.mu.RLock()
+	defer s.mu.RUnlock()
+	defer other.mu.RUnlock()
+	for k := range s.items {
+		if _, ok := other.items[k]; ok {
+			result.items[k] = struct{}{}
+		}
+	}
+	return result
+}
+
+// Difference returns a new set with elements in s but not in other.
+func (s *Set[T]) Difference(other *Set[T]) *Set[T] {
+	result := NewSet[T]()
+	s.mu.RLock()
+	other.mu.RLock()
+	defer s.mu.RUnlock()
+	defer other.mu.RUnlock()
+	for k := range s.items {
+		if _, ok := other.items[k]; !ok {
+			result.items[k] = struct{}{}
+		}
+	}
+	return result
+}
+
+// ForEach calls fn for each element. Iteration stops if fn returns false.
+func (s *Set[T]) ForEach(fn func(T) bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for k := range s.items {
+		if !fn(k) {
+			return
+		}
+	}
+}
