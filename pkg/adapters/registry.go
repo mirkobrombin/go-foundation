@@ -15,6 +15,8 @@ type Registry[T any] struct {
 	adapters    map[string]T
 	defaultName string
 	mu          sync.RWMutex
+	onRegister  []func(name string, adapter T)
+	onRemove    []func(name string)
 }
 
 // NewRegistry creates an empty adapter registry.
@@ -29,6 +31,9 @@ func (r *Registry[T]) Register(name string, adapter T) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.adapters[name] = adapter
+	for _, fn := range r.onRegister {
+		fn(name, adapter)
+	}
 }
 
 // Get retrieves an adapter by name.
@@ -120,6 +125,23 @@ func (r *Registry[T]) Remove(name string) {
 	if r.defaultName == name {
 		r.defaultName = ""
 	}
+	for _, fn := range r.onRemove {
+		fn(name)
+	}
+}
+
+// OnRegister registers a callback that fires when an adapter is registered.
+func (r *Registry[T]) OnRegister(fn func(name string, adapter T)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onRegister = append(r.onRegister, fn)
+}
+
+// OnRemove registers a callback that fires when an adapter is removed.
+func (r *Registry[T]) OnRemove(fn func(name string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onRemove = append(r.onRemove, fn)
 }
 
 // Clear removes all adapters.
@@ -128,4 +150,6 @@ func (r *Registry[T]) Clear() {
 	defer r.mu.Unlock()
 	r.adapters = make(map[string]T)
 	r.defaultName = ""
+	r.onRegister = nil
+	r.onRemove = nil
 }

@@ -18,6 +18,7 @@ type Parser struct {
 	kvSeparator     string
 	valueDelim      string
 	includeUntagged bool
+	nested          bool
 	cache           map[reflect.Type][]FieldMeta
 	mu              sync.RWMutex
 }
@@ -43,6 +44,13 @@ func WithKVSeparator(s string) Option {
 // WithValueDelimiter sets the delimiter for multiple values (default ",").
 func WithValueDelimiter(d string) Option {
 	return func(p *Parser) { p.valueDelim = d }
+}
+
+// WithNested enables recursive parsing of nested and embedded struct fields.
+// When enabled, fields of struct type are recursed into with their tag prefix
+// set to the parent field name followed by a dot.
+func WithNested() Option {
+	return func(p *Parser) { p.nested = true }
 }
 
 // NewParser creates a Parser for the given tag name.
@@ -135,13 +143,28 @@ func (p *Parser) ParseType(typ reflect.Type) []FieldMeta {
 		return cached
 	}
 
+	fields := p.parseTypeRecursive(typ, "", 0)
+	p.cache[typ] = fields
+	return fields
+}
+
+func (p *Parser) parseTypeRecursive(typ reflect.Type, prefix string, startIndex int) []FieldMeta {
 	var fields []FieldMeta
+	index := startIndex
 
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		tag := field.Tag.Get(p.tagName)
-		if tag == "" && !p.includeUntagged {
+		hasTag := tag != ""
+		shouldRecurse := p.nested && (field.Type.Kind() == reflect.Struct || (field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct))
+
+		if !hasTag && !p.includeUntagged && !shouldRecurse {
 			continue
+		}
+
+		fieldName := field.Name
+		if prefix != "" {
+			fieldName = prefix + "." + field.Name
 		}
 
 		var parsedTags map[string][]string
@@ -149,17 +172,30 @@ func (p *Parser) ParseType(typ reflect.Type) []FieldMeta {
 			parsedTags = p.Parse(tag)
 		}
 
-		fields = append(fields, FieldMeta{
-			Name:       field.Name,
-			Index:      i,
-			Type:       field.Type,
-			Tags:       parsedTags,
-			RawTag:     tag,
-			IsExported: field.IsExported(),
-		})
-	}
+		if hasTag || p.includeUntagged {
+			fields = append(fields, FieldMeta{
+				Name:       fieldName,
+				Index:      index,
+				Type:       field.Type,
+				Tags:       parsedTags,
+				RawTag:     tag,
+				IsExported: field.IsExported(),
+			})
+		}
+		index++
 
-	p.cache[typ] = fields
+		if shouldRecurse {
+			var nestedType reflect.Type
+			if field.Type.Kind() == reflect.Struct {
+				nestedType = field.Type
+			} else if field.Type.Kind() == reflect.Ptr {
+				nestedType = field.Type.Elem()
+			}
+			nested := p.parseTypeRecursive(nestedType, fieldName, index)
+			fields = append(fields, nested...)
+			index += len(nested)
+		}
+	}
 	return fields
 }
 

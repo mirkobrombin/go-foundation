@@ -1,21 +1,91 @@
 package errors
 
 import (
+	"fmt"
+	"runtime"
 	"strings"
 )
 
-// MultiError is a collection of errors that implements the error interface.
-//
-// Example:
-//
-//	errs := &errors.MultiError{}
-//	errs.Append(err1, err2)
-//	if err := errs.ErrorOrNil(); err != nil { ... }
 type MultiError struct {
 	Errors []error
 }
 
-// Append adds errors to the collection. Nil errors are ignored.
+type withStack struct {
+	err   error
+	stack []uintptr
+}
+
+func (w *withStack) Error() string {
+	return w.err.Error()
+}
+
+func (w *withStack) Unwrap() error {
+	return w.err
+}
+
+func (w *withStack) Stack() []uintptr {
+	return w.stack
+}
+
+type withCode struct {
+	err  error
+	code string
+}
+
+func (w *withCode) Error() string {
+	return fmt.Sprintf("[%s] %s", w.code, w.err.Error())
+}
+
+func (w *withCode) Unwrap() error {
+	return w.err
+}
+
+func (w *withCode) Code() string {
+	return w.code
+}
+
+func Wrap(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := err.(*withStack); ok {
+		return err
+	}
+	pc := make([]uintptr, 32)
+	n := runtime.Callers(3, pc)
+	return &withStack{err: err, stack: pc[:n]}
+}
+
+func WithCode(code string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &withCode{err: err, code: code}
+}
+
+func StackTrace(err error) []uintptr {
+	type stackTracer interface {
+		Stack() []uintptr
+	}
+	var st stackTracer
+	for {
+		if s, ok := err.(stackTracer); ok {
+			st = s
+		}
+		u := err
+		if unwrapper, ok := err.(interface{ Unwrap() error }); ok {
+			err = unwrapper.Unwrap()
+		} else {
+			break
+		}
+		_ = u
+	}
+	if st != nil {
+		return st.Stack()
+	}
+	return nil
+}
+
 func (e *MultiError) Append(errs ...error) {
 	for _, err := range errs {
 		if err != nil {
@@ -24,11 +94,6 @@ func (e *MultiError) Append(errs ...error) {
 	}
 }
 
-// Error implements the error interface.
-//
-// Returns:
-//
-// A concatenated string of all error messages, separated by semicolons.
 func (e *MultiError) Error() string {
 	if len(e.Errors) == 0 {
 		return ""
@@ -47,17 +112,14 @@ func (e *MultiError) Error() string {
 	return sb.String()
 }
 
-// Unwrap returns the errors as a slice for errors.Is/As support (Go 1.20+).
 func (e *MultiError) Unwrap() []error {
 	return e.Errors
 }
 
-// HasErrors returns true if there are any errors in the collection.
 func (e *MultiError) HasErrors() bool {
 	return len(e.Errors) > 0
 }
 
-// ErrorOrNil returns nil if there are no errors, otherwise returns itself.
 func (e *MultiError) ErrorOrNil() error {
 	if len(e.Errors) == 0 {
 		return nil
@@ -65,11 +127,6 @@ func (e *MultiError) ErrorOrNil() error {
 	return e
 }
 
-// Join is a helper to join multiple errors into a single error.
-//
-// Example:
-//
-//	err := errors.Join(err1, err2)
 func Join(errs ...error) error {
 	e := &MultiError{}
 	e.Append(errs...)

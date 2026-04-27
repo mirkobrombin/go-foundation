@@ -1,5 +1,9 @@
 package options
 
+import (
+	"reflect"
+)
+
 // Option is a functional option for configuration.
 type Option[T any] func(*T)
 
@@ -52,4 +56,27 @@ func (b *Builder[T]) Build() T {
 func (b *Builder[T]) Ptr() *T {
 	Apply(&b.cfg, b.opts...)
 	return &b.cfg
+}
+
+// Merge combines multiple configurations of the same type. Later values
+// override earlier ones for fields that are non-zero.
+//
+// Example:
+//
+//	cfg := options.Merge(defaultCfg, userCfg)
+func Merge[T any](cfgs ...T) T {
+	var result T
+	resultVal := reflect.ValueOf(&result).Elem()
+	resultType := resultVal.Type()
+
+	for _, cfg := range cfgs {
+		cfgVal := reflect.ValueOf(cfg)
+		for i := 0; i < resultType.NumField(); i++ {
+			field := cfgVal.Field(i)
+			if !field.IsZero() {
+				resultVal.Field(i).Set(field)
+			}
+		}
+	}
+	return result
 }
