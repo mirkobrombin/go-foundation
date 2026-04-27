@@ -3,6 +3,7 @@ package resiliency
 import (
 	"context"
 	"math"
+	"math/rand"
 	"time"
 )
 
@@ -12,6 +13,8 @@ type RetryOptions struct {
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 	Factor       float64
+	Jitter       float64
+	RetryIf      func(error) bool
 }
 
 // DefaultRetryOptions provides reasonable defaults.
@@ -45,12 +48,20 @@ func Retry(ctx context.Context, fn func() error, opts ...func(*RetryOptions)) er
 			return nil
 		} else {
 			lastErr = err
+			if o.RetryIf != nil && !o.RetryIf(err) {
+				return err
+			}
 		}
 
 		if i < o.Attempts-1 {
 			delay := time.Duration(float64(o.InitialDelay) * math.Pow(o.Factor, float64(i)))
 			if delay > o.MaxDelay {
 				delay = o.MaxDelay
+			}
+
+			if o.Jitter > 0 {
+				jitter := time.Duration(float64(delay) * o.Jitter * rand.Float64())
+				delay += jitter
 			}
 
 			timer := time.NewTimer(delay)
@@ -82,4 +93,32 @@ func WithDelay(initial, max time.Duration) func(*RetryOptions) {
 // WithFactor sets the backoff factor.
 func WithFactor(f float64) func(*RetryOptions) {
 	return func(o *RetryOptions) { o.Factor = f }
+}
+
+// WithJitter adds random jitter to the retry delay to prevent thundering herd.
+//
+// Example:
+//
+//	resiliency.Retry(ctx, fn,
+//	    resiliency.WithJitter(0.3),
+//	)
+func WithJitter(jitterFactor float64) func(*RetryOptions) {
+	return func(o *RetryOptions) {
+		o.Jitter = jitterFactor
+	}
+}
+
+// WithRetryIf adds a condition for retrying based on the error.
+//
+// Example:
+//
+//	resiliency.Retry(ctx, fn,
+//	    resiliency.WithRetryIf(func(err error) bool {
+//	        return !errors.Is(err, ErrFatal)
+//	    }),
+//	)
+func WithRetryIf(fn func(error) bool) func(*RetryOptions) {
+	return func(o *RetryOptions) {
+		o.RetryIf = fn
+	}
 }

@@ -140,7 +140,7 @@ func TestShardedMap_KeysDistribution(t *testing.T) {
 	// Each shard should have roughly count/4 items
 	// Not strict check due to potential collision, but shouldn't be 0
 	for i, shard := range m.shards {
-		if shard.Len() == 0 {
+		if len(shard.data) == 0 {
 			t.Errorf("Shard %d is empty, bad distribution or small sample", i)
 		}
 	}
