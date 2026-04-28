@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Hasher computes a uint64 hash for keys.
 type Hasher[K any] func(K) uint64
 
 type ttlEntry[V any] struct {
@@ -18,6 +19,7 @@ func (e ttlEntry[V]) expired() bool {
 	return !e.expiry.IsZero() && time.Now().After(e.expiry)
 }
 
+// ShardedMap is a concurrent map with shard-level locking and TTL support.
 type ShardedMap[K comparable, V any] struct {
 	shards []*concurrentShard[K, V]
 	mask   uint64
@@ -31,6 +33,7 @@ type concurrentShard[K comparable, V any] struct {
 	data map[K]ttlEntry[V]
 }
 
+// NewSharded creates a new ShardedMap with the given hasher and shard count.
 func NewSharded[K comparable, V any](hasher Hasher[K], shardCount int) *ShardedMap[K, V] {
 	if shardCount <= 0 {
 		shardCount = 32
@@ -51,6 +54,7 @@ func NewSharded[K comparable, V any](hasher Hasher[K], shardCount int) *ShardedM
 	}
 }
 
+// WithExpiry sets the default TTL for entries.
 func (m *ShardedMap[K, V]) WithExpiry(d time.Duration) *ShardedMap[K, V] {
 	m.expiry = d
 	return m
@@ -61,6 +65,7 @@ func (m *ShardedMap[K, V]) getShard(key K) *concurrentShard[K, V] {
 	return m.shards[hash&m.mask]
 }
 
+// Set stores a key-value pair.
 func (m *ShardedMap[K, V]) Set(key K, value V) {
 	s := m.getShard(key)
 	e := ttlEntry[V]{value: value}
@@ -72,6 +77,7 @@ func (m *ShardedMap[K, V]) Set(key K, value V) {
 	s.mu.Unlock()
 }
 
+// Get retrieves a value by key.
 func (m *ShardedMap[K, V]) Get(key K) (V, bool) {
 	s := m.getShard(key)
 	s.mu.RLock()
@@ -91,17 +97,20 @@ func (m *ShardedMap[K, V]) Get(key K) (V, bool) {
 	return e.value, true
 }
 
+// Delete removes a key from the map.
 func (m *ShardedMap[K, V]) Delete(key K) {
 	m.getShard(key).mu.Lock()
 	delete(m.getShard(key).data, key)
 	m.getShard(key).mu.Unlock()
 }
 
+// Has reports whether a key exists.
 func (m *ShardedMap[K, V]) Has(key K) bool {
 	_, ok := m.Get(key)
 	return ok
 }
 
+// Len returns the total number of entries.
 func (m *ShardedMap[K, V]) Len() int {
 	total := 0
 	for _, s := range m.shards {
@@ -112,6 +121,7 @@ func (m *ShardedMap[K, V]) Len() int {
 	return total
 }
 
+// Clear removes all entries.
 func (m *ShardedMap[K, V]) Clear() {
 	for _, s := range m.shards {
 		s.mu.Lock()
@@ -120,6 +130,7 @@ func (m *ShardedMap[K, V]) Clear() {
 	}
 }
 
+// Range iterates over non-expired entries until fn returns false.
 func (m *ShardedMap[K, V]) Range(fn func(key K, value V) bool) {
 	for _, s := range m.shards {
 		s.mu.RLock()
@@ -140,6 +151,7 @@ func (m *ShardedMap[K, V]) Range(fn func(key K, value V) bool) {
 	}
 }
 
+// GetOrSet returns the existing value or sets and returns the default.
 func (m *ShardedMap[K, V]) GetOrSet(key K, defaultValue V) V {
 	s := m.getShard(key)
 	s.mu.Lock()
@@ -155,6 +167,7 @@ func (m *ShardedMap[K, V]) GetOrSet(key K, defaultValue V) V {
 	return defaultValue
 }
 
+// Compute atomically updates or inserts a value.
 func (m *ShardedMap[K, V]) Compute(key K, fn func(existing V, exists bool) V) V {
 	s := m.getShard(key)
 	s.mu.Lock()
@@ -179,6 +192,7 @@ func (m *ShardedMap[K, V]) Compute(key K, fn func(existing V, exists bool) V) V 
 	return newVal
 }
 
+// Keys returns all non-expired keys.
 func (m *ShardedMap[K, V]) Keys() []K {
 	var all []K
 	for _, s := range m.shards {
@@ -193,6 +207,7 @@ func (m *ShardedMap[K, V]) Keys() []K {
 	return all
 }
 
+// Values returns all non-expired values.
 func (m *ShardedMap[K, V]) Values() []V {
 	var all []V
 	for _, s := range m.shards {
@@ -207,6 +222,7 @@ func (m *ShardedMap[K, V]) Values() []V {
 	return all
 }
 
+// StringHasher is a Hasher[string] using FNV-1a 64-bit.
 func StringHasher(s string) uint64 {
 	h := fnv.New64a()
 	h.Write([]byte(s))

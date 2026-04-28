@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// Status represents the health status of a component.
 type Status int
 
 const (
@@ -14,6 +15,7 @@ const (
 	StatusUnhealthy
 )
 
+// String returns the textual representation of the status.
 func (s Status) String() string {
 	switch s {
 	case StatusHealthy:
@@ -27,25 +29,30 @@ func (s Status) String() string {
 	}
 }
 
+// Report contains the result of a health check.
 type Report struct {
 	Status   Status
 	Duration time.Duration
 	Details  map[string]any
 }
 
+// Checker performs a health check and returns a Report.
 type Checker interface {
 	Check(ctx context.Context) Report
 }
 
+// Registry manages a set of named health Checkers.
 type Registry struct {
 	mu     sync.RWMutex
 	checks map[string]Checker
 }
 
+// NewRegistry creates a new health check Registry.
 func NewRegistry() *Registry {
 	return &Registry{checks: make(map[string]Checker)}
 }
 
+// Register adds a named checker to the registry.
 func (r *Registry) Register(name string, c Checker) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

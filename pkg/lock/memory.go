@@ -12,6 +12,7 @@ type InMemoryLocker struct {
 	locks map[string]struct{}
 }
 
+// NewInMemoryLocker creates a new in-process Locker.
 func NewInMemoryLocker() *InMemoryLocker {
 	return &InMemoryLocker{
 		locks: make(map[string]struct{}),

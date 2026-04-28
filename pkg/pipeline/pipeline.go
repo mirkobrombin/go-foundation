@@ -4,13 +4,16 @@ import (
 	"context"
 )
 
+// Middleware wraps a pipeline handler with cross-cutting behavior.
 type Middleware[T, U any] func(ctx context.Context, input T, next func(context.Context, T) (U, error)) (U, error)
 
+// Pipeline chains Middleware functions around a final handler.
 type Pipeline[T, U any] struct {
 	middlewares []Middleware[T, U]
 	handler     func(context.Context, T) (U, error)
 }
 
+// New creates an empty Pipeline.
 func New[T, U any]() *Pipeline[T, U] {
 	return &Pipeline[T, U]{}
 }

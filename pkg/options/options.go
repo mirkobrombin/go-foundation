@@ -58,8 +58,9 @@ func (b *Builder[T]) Ptr() *T {
 	return &b.cfg
 }
 
-// Merge combines multiple configurations of the same type. Later values
-// override earlier ones for fields that are non-zero.
+// Merge combines multiple configurations of the same type.
+// Later values always overwrite earlier ones (LastWins semantics).
+// For SkipZero semantics, use MergeConfig from options_ext.go.
 //
 // Example:
 //
@@ -72,10 +73,7 @@ func Merge[T any](cfgs ...T) T {
 	for _, cfg := range cfgs {
 		cfgVal := reflect.ValueOf(cfg)
 		for i := 0; i < resultType.NumField(); i++ {
-			field := cfgVal.Field(i)
-			if !field.IsZero() {
-				resultVal.Field(i).Set(field)
-			}
+			resultVal.Field(i).Set(cfgVal.Field(i))
 		}
 	}
 	return result

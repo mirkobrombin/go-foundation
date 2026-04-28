@@ -11,8 +11,10 @@ import (
 	"github.com/mirkobrombin/go-foundation/pkg/safemap"
 )
 
+// Handler processes an event of type T.
 type Handler[T any] func(ctx context.Context, event T) error
 
+// Priority defines the ordering of event handlers.
 type Priority int
 
 const (
@@ -21,6 +23,7 @@ const (
 	PriorityLow    Priority = -100
 )
 
+// DispatchStrategy controls error handling during event dispatch.
 type DispatchStrategy int
 
 const (
@@ -28,8 +31,10 @@ const (
 	BestEffort
 )
 
+// Middleware wraps event dispatch with cross-cutting behavior.
 type Middleware func(ctx context.Context, event any, next func(ctx context.Context, event any) error) error
 
+// Bus is a type-safe event bus with priorities, wildcards, and middleware.
 type Bus struct {
 	subscribers  *safemap.Map[reflect.Type, []subscriber]
 	strategy     DispatchStrategy
@@ -46,12 +51,15 @@ type subscriber struct {
 
 var defaultBus = New()
 
+// Default returns the package-level default event bus.
 func Default() *Bus {
 	return defaultBus
 }
 
+// Option configures a Bus.
 type Option = options.Option[Bus]
 
+// New creates a new event Bus with the given options.
 func New(opts ...Option) *Bus {
 	b := &Bus{
 		subscribers: safemap.New[reflect.Type, []subscriber](),
@@ -61,20 +69,24 @@ func New(opts ...Option) *Bus {
 	return b
 }
 
+// WithStrategy sets the dispatch strategy for the Bus.
 func WithStrategy(s DispatchStrategy) Option {
 	return func(b *Bus) { b.strategy = s }
 }
 
+// WithOnAsyncError sets the error handler for async event emissions.
 func WithOnAsyncError(fn func(error)) Option {
 	return func(b *Bus) { b.onAsyncError = fn }
 }
 
+// Use appends middleware to the bus.
 func (b *Bus) Use(mw Middleware) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.middlewares = append(b.middlewares, mw)
 }
 
+// Subscribe registers a typed handler for events of type T.
 func Subscribe[T any](b *Bus, fn Handler[T], priority ...Priority) {
 	if b == nil {
 		b = defaultBus
@@ -93,6 +105,7 @@ func Subscribe[T any](b *Bus, fn Handler[T], priority ...Priority) {
 	})
 }
 
+// SubscribeWildcard registers a handler for all event types.
 func SubscribeWildcard(b *Bus, fn func(ctx context.Context, event any) error) {
 	if b == nil {
 		b = defaultBus
@@ -102,6 +115,7 @@ func SubscribeWildcard(b *Bus, fn func(ctx context.Context, event any) error) {
 	b.wildcard = append(b.wildcard, subscriber{handler: fn})
 }
 
+// Emit dispatches an event to all matching handlers synchronously.
 func Emit[T any](ctx context.Context, b *Bus, event T) error {
 	if b == nil {
 		b = defaultBus
@@ -157,6 +171,7 @@ func Emit[T any](ctx context.Context, b *Bus, event T) error {
 	return nil
 }
 
+// EmitAsync dispatches an event in a goroutine. Errors are sent to OnAsyncError.
 func EmitAsync[T any](ctx context.Context, b *Bus, event T) {
 	if b == nil {
 		b = defaultBus

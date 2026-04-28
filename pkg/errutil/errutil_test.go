@@ -1,4 +1,4 @@
-package errors
+package errutil
 
 import (
 	"errors"
@@ -46,16 +46,16 @@ func TestMultiError_Unwrap(t *testing.T) {
 	}
 }
 
-func TestJoin(t *testing.T) {
-	err := Join(errors.New("a"), nil, errors.New("b"))
+func TestJoinErrors(t *testing.T) {
+	err := JoinErrors(errors.New("a"), nil, errors.New("b"))
 	if err == nil {
-		t.Fatal("Join should return error")
+		t.Fatal("JoinErrors should return error")
 	}
 	if !strings.Contains(err.Error(), "a") || !strings.Contains(err.Error(), "b") {
-		t.Errorf("Join error content: %v", err)
+		t.Errorf("JoinErrors error content: %v", err)
 	}
 
-	if Join(nil, nil) != nil {
-		t.Error("Join with only nil should return nil")
+	if JoinErrors(nil, nil) != nil {
+		t.Error("JoinErrors with only nil should return nil")
 	}
 }

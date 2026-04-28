@@ -9,6 +9,7 @@ type ByteBuffer struct {
 	w   int
 }
 
+// NewBytes creates a new ByteBuffer with the given capacity.
 func NewBytes(capacity int) *ByteBuffer {
 	if capacity < 1 {
 		panic("ring: capacity must be >= 1")

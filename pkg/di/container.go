@@ -1,6 +1,7 @@
 package di
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -8,45 +9,156 @@ import (
 	"github.com/mirkobrombin/go-foundation/pkg/tags"
 )
 
-// Container manages dependency injection with thread-safe access.
-//
-// Example:
-//
-//	c := di.New()
-//	c.Provide("db", &Database{})
-//	db := di.Get[*Database](c, "db")
+// Lifetime controls how a service is instantiated.
+type Lifetime int
+
+const (
+	Transient Lifetime = iota
+	Singleton
+	Scoped
+)
+
+type serviceEntry struct {
+	lifetime Lifetime
+	factory  any
+	instance any
+	built    bool
+}
+
+// Container holds registered services and named instances.
 type Container struct {
-	providers map[string]any
-	mu        sync.RWMutex
+	services map[reflect.Type]*serviceEntry
+	named    map[string]any
+	mu       sync.RWMutex
+	parent   *Container
 }
 
 var injectParser = tags.NewParser("inject", tags.WithPairDelimiter(";"), tags.WithKVSeparator(":"), tags.WithIncludeUntagged())
 
-// New creates an empty DI container.
+// New creates an empty Container.
 func New() *Container {
 	return &Container{
-		providers: make(map[string]any),
+		services: make(map[reflect.Type]*serviceEntry),
+		named:    make(map[string]any),
 	}
 }
 
-// Provide registers a dependency by name.
-// It automatically verifies any contracts declared via contracts.Implements.
+// Builder registers services before building a Container.
+type Builder struct {
+	services map[reflect.Type]*serviceEntry
+	named    map[string]any
+	mu       sync.RWMutex
+}
+
+// NewBuilder creates an empty Builder.
+func NewBuilder() *Builder {
+	return &Builder{
+		services: make(map[reflect.Type]*serviceEntry),
+		named:    make(map[string]any),
+	}
+}
+
+// Register adds a typed factory to the builder.
+func Register[T any](b *Builder, factory func() T, lifetime ...Lifetime) {
+	lt := Singleton
+	if len(lifetime) > 0 {
+		lt = lifetime[0]
+	}
+	typ := reflect.TypeOf((*T)(nil)).Elem()
+	b.mu.Lock()
+	b.services[typ] = &serviceEntry{lifetime: lt, factory: factory}
+	b.mu.Unlock()
+}
+
+// Build creates a Container from the registered services.
+func (b *Builder) Build() *Container {
+	c := New()
+	b.mu.RLock()
+	for k, v := range b.services {
+		c.services[k] = v
+	}
+	for k, v := range b.named {
+		c.named[k] = v
+	}
+	b.mu.RUnlock()
+	return c
+}
+
+// Provide adds a named instance to the builder.
+func (b *Builder) Provide(name string, instance any) {
+	contracts.MustVerify(instance)
+	b.mu.Lock()
+	b.named[name] = instance
+	b.mu.Unlock()
+}
+
+// ResolveType resolves a typed service from the container.
+func ResolveType[T any](c *Container) T {
+	var zero T
+	typ := reflect.TypeOf((*T)(nil)).Elem()
+
+	c.mu.RLock()
+	entry, ok := c.services[typ]
+	c.mu.RUnlock()
+
+	if !ok {
+		if c.parent != nil {
+			return ResolveType[T](c.parent)
+		}
+		panic(fmt.Sprintf("di: cannot resolve type %v", typ))
+	}
+
+	switch entry.lifetime {
+	case Singleton:
+		if entry.built {
+			return entry.instance.(T)
+		}
+		c.mu.Lock()
+		if entry.built {
+			c.mu.Unlock()
+			return entry.instance.(T)
+		}
+		fn := entry.factory.(func() T)
+		instance := fn()
+		entry.instance = instance
+		entry.built = true
+		c.mu.Unlock()
+		return instance
+	case Transient:
+		fn := entry.factory.(func() T)
+		return fn()
+	case Scoped:
+		if entry.built {
+			return entry.instance.(T)
+		}
+		c.mu.Lock()
+		if entry.built {
+			c.mu.Unlock()
+			return entry.instance.(T)
+		}
+		fn := entry.factory.(func() T)
+		instance := fn()
+		entry.instance = instance
+		entry.built = true
+		c.mu.Unlock()
+		return instance
+	default:
+		return zero
+	}
+}
+
+// Provide adds a named instance to the container.
 func (c *Container) Provide(name string, instance any) {
 	contracts.MustVerify(instance)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.providers[name] = instance
+	c.named[name] = instance
+	c.mu.Unlock()
 }
 
-// Get retrieves a dependency by name.
-// If the provider is lazy, the factory is called on first access.
-//
-// Returns:
-//
-// The value and true if found, otherwise nil and false.
+// Get retrieves a named instance from the container.
 func (c *Container) Get(name string) (any, bool) {
 	c.mu.RLock()
-	v, ok := c.providers[name]
+	v, ok := c.named[name]
 	c.mu.RUnlock()
 	if !ok {
 		return nil, false
@@ -57,25 +169,7 @@ func (c *Container) Get(name string) (any, bool) {
 	return v, true
 }
 
-// ResolveAll finds all registered dependencies that implement the given interface T.
-func ResolveAll[T any](c *Container) []T {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	var result []T
-	for _, v := range c.providers {
-		if t, ok := v.(T); ok {
-			result = append(result, t)
-		}
-	}
-	return result
-}
-
-// MustGet retrieves a dependency and panics if not found.
-//
-// Notes:
-//
-// Panics if the dependency is missing.
+// MustGet retrieves a named instance or panics if not found.
 func (c *Container) MustGet(name string) any {
 	v, ok := c.Get(name)
 	if !ok {
@@ -84,17 +178,15 @@ func (c *Container) MustGet(name string) any {
 	return v
 }
 
-// Has checks if a dependency is registered.
+// Has reports whether a named instance exists.
 func (c *Container) Has(name string) bool {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	_, ok := c.providers[name]
+	_, ok := c.named[name]
+	c.mu.RUnlock()
 	return ok
 }
 
-// Inject populates struct fields with registered dependencies.
-// Uses `inject:"name"` tags to match fields with providers.
-// Falls back to field name if no inject tag is present.
+// Inject populates struct fields tagged with "inject".
 func (c *Container) Inject(target any) {
 	val := reflect.ValueOf(target)
 	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
@@ -119,7 +211,7 @@ func (c *Container) Inject(target any) {
 			name = meta.Name
 		}
 
-		if dep, ok := c.providers[name]; ok {
+		if dep, ok := c.named[name]; ok {
 			if lp, ok := dep.(*lazyProvider); ok {
 				dep = lp.get()
 			}
@@ -131,24 +223,78 @@ func (c *Container) Inject(target any) {
 	}
 }
 
-// Scope creates a child container that inherits from parent.
-// The child can override providers without affecting the parent.
+// Scope creates a child container with fresh scoped instances.
 func (c *Container) Scope() *Container {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	child := New()
+	child.parent = c
+	for k, v := range c.services {
+		if v.lifetime == Scoped {
+			child.services[k] = &serviceEntry{
+				lifetime: v.lifetime,
+				factory:  v.factory,
+			}
+		} else {
+			child.services[k] = v
+		}
+	}
+	for k, v := range c.named {
+		child.named[k] = v
+	}
+	return child
+}
+
+// ProvideLazy adds a lazily-initialized named instance.
+func (c *Container) ProvideLazy(name string, factory func() any) {
+	c.mu.Lock()
+	c.named[name] = &lazyProvider{factory: factory}
+	c.mu.Unlock()
+}
+
+// Clone returns a shallow copy of the container.
+func (c *Container) Clone() *Container {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	clone := New()
-	for k, v := range c.providers {
-		clone.providers[k] = v
+	for k, v := range c.services {
+		clone.services[k] = v
+	}
+	for k, v := range c.named {
+		clone.named[k] = v
 	}
 	return clone
 }
 
-// ProvideLazy registers a factory that is called only on first Get.
-func (c *Container) ProvideLazy(name string, factory func() any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.providers[name] = &lazyProvider{factory: factory}
+// Keys returns all named instance keys.
+func (c *Container) Keys() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	keys := make([]string, 0, len(c.named))
+	for k := range c.named {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// ResolveAllTyped returns all named instances implementing iface.
+func (c *Container) ResolveAllTyped(iface reflect.Type) []any {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []any
+	for _, v := range c.named {
+		if lp, ok := v.(*lazyProvider); ok {
+			v = lp.get()
+		}
+		if reflect.TypeOf(v).Implements(iface) {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 type lazyProvider struct {
@@ -162,28 +308,4 @@ func (l *lazyProvider) get() any {
 		l.value = l.factory()
 	})
 	return l.value
-}
-
-// Clone creates a shallow copy of the container.
-func (c *Container) Clone() *Container {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	clone := New()
-	for k, v := range c.providers {
-		clone.providers[k] = v
-	}
-	return clone
-}
-
-// Keys returns all registered dependency names.
-func (c *Container) Keys() []string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	keys := make([]string, 0, len(c.providers))
-	for k := range c.providers {
-		keys = append(keys, k)
-	}
-	return keys
 }

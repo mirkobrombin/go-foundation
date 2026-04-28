@@ -21,6 +21,7 @@ type Entry struct {
 	Data     []byte
 }
 
+// IsTrailer reports whether the entry is the CPIO trailer.
 func (e *Entry) IsTrailer() bool { return e != nil && e.Name == "TRAILER!!!" }
 
 // Reader reads CPIO newc/crc archives.
@@ -29,6 +30,7 @@ type Reader struct {
 	done bool
 }
 
+// NewReader creates a new CPIO reader from the given io.Reader.
 func NewReader(r io.Reader) *Reader { return &Reader{r: r} }
 
 // Writer writes CPIO newc archives.
@@ -41,9 +43,12 @@ type Writer struct {
 	closed bool
 }
 
+// WriterOption configures a Writer.
 type WriterOption func(*Writer)
 
+// WithMTimeUnix sets the mtime for the Writer.
 func WithMTimeUnix(mtime uint32) WriterOption { return func(w *Writer) { w.mtime = mtime } }
+// WithUIDGID sets the UID and GID for the Writer.
 func WithUIDGID(uid, gid uint32) WriterOption {
 	return func(w *Writer) {
 		w.uid = uid
@@ -51,6 +56,7 @@ func WithUIDGID(uid, gid uint32) WriterOption {
 	}
 }
 
+// NewWriter creates a new CPIO newc Writer writing to w.
 func NewWriter(w io.Writer, opts ...WriterOption) *Writer {
 	wr := &Writer{w: w, ino: 1}
 	for _, opt := range opts {

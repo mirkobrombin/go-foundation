@@ -11,13 +11,16 @@ import (
 	"github.com/mirkobrombin/go-foundation/pkg/tags"
 )
 
+// Rule validates a reflect.Value with an optional parameter.
 type Rule func(value reflect.Value, param string) error
 
+// Validator registers and runs validation rules against struct fields.
 type Validator struct {
 	mu    sync.RWMutex
 	rules map[string]Rule
 }
 
+// Error represents a single validation error for a field.
 type Error struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
@@ -27,6 +30,7 @@ func (e Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
+// Errors is a slice of validation errors.
 type Errors []Error
 
 func (e Errors) Error() string {
@@ -37,6 +41,7 @@ func (e Errors) Error() string {
 	return strings.Join(msgs, "; ")
 }
 
+// New creates a Validator with built-in rules registered.
 func New() *Validator {
 	v := &Validator{rules: make(map[string]Rule)}
 	v.registerBuiltin()

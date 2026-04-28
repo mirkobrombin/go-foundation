@@ -1,4 +1,4 @@
-package reflect
+package reflectutil
 
 import (
 	"reflect"
@@ -56,7 +56,7 @@ func TestBind(t *testing.T) {
 	})
 }
 
-func TestParseBool(t *testing.T) {
+func TestParseBoolExtended(t *testing.T) {
 	tests := []struct {
 		input string
 		want  bool
@@ -74,12 +74,12 @@ func TestParseBool(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got, err := ParseBool(tt.input)
+		got, err := ParseBoolExtended(tt.input)
 		if (err != nil) != tt.err {
-			t.Errorf("ParseBool(%q) error = %v, wantErr %v", tt.input, err, tt.err)
+			t.Errorf("ParseBoolExtended(%q) error = %v, wantErr %v", tt.input, err, tt.err)
 		}
 		if got != tt.want {
-			t.Errorf("ParseBool(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("ParseBoolExtended(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }

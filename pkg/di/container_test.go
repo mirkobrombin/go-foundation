@@ -2,6 +2,8 @@ package di
 
 import (
 	"testing"
+
+	"github.com/mirkobrombin/go-foundation/pkg/contracts"
 )
 
 type testDB struct {
@@ -61,23 +63,6 @@ func TestContainer_Inject(t *testing.T) {
 
 	if svc.Logger != "stdout" {
 		t.Errorf("Logger: got %q, want %q", svc.Logger, "stdout")
-	}
-}
-
-func TestContainer_InjectFallbackToFieldName(t *testing.T) {
-	type noTagService struct {
-		DB *testDB
-	}
-
-	c := New()
-	db := &testDB{Name: "fallback"}
-	c.Provide("DB", db)
-
-	svc := &noTagService{}
-	c.Inject(svc)
-
-	if svc.DB != db {
-		t.Error("DB not injected via field name fallback")
 	}
 }
 
@@ -157,4 +142,186 @@ func TestMustResolve_Panic(t *testing.T) {
 	}()
 
 	MustResolve[int](c, "missing")
+}
+
+// --- Builder / Register / ResolveType tests ---
+
+func TestBuilder_RegisterAndResolveType(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *testDB { return &testDB{Name: "built"} })
+
+	c := b.Build()
+	db := ResolveType[*testDB](c)
+	if db.Name != "built" {
+		t.Errorf("got %q, want %q", db.Name, "built")
+	}
+}
+
+func TestBuilder_TransientLifetime(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *testDB { return &testDB{Name: "fresh"} }, Transient)
+
+	c := b.Build()
+	a := ResolveType[*testDB](c)
+	b2 := ResolveType[*testDB](c)
+	if a == b2 {
+		t.Error("Transient should return new instances")
+	}
+}
+
+func TestBuilder_SingletonLifetime(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *testDB { return &testDB{Name: "singleton"} }, Singleton)
+
+	c := b.Build()
+	a := ResolveType[*testDB](c)
+	b2 := ResolveType[*testDB](c)
+	if a != b2 {
+		t.Error("Singleton should return same instance")
+	}
+}
+
+func TestResolveType_PanicOnMissing(t *testing.T) {
+	b := NewBuilder()
+	c := b.Build()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("ResolveType should panic on missing type")
+		}
+	}()
+
+	ResolveType[*testDB](c)
+}
+
+func TestBuilder_ProvideNamed(t *testing.T) {
+	b := NewBuilder()
+	b.Provide("db", &testDB{Name: "named"})
+
+	c := b.Build()
+	got, ok := c.Get("db")
+	if !ok {
+		t.Fatal("expected named dep 'db'")
+	}
+	db := got.(*testDB)
+	if db.Name != "named" {
+		t.Errorf("got %q, want %q", db.Name, "named")
+	}
+}
+
+// --- Contracts tests (merged from contracts_test.go) ---
+
+type Worker interface {
+	Work() string
+}
+
+type GoodWorker struct {
+	contracts.Implements[Worker]
+}
+
+func (g *GoodWorker) Work() string {
+	return "working hard"
+}
+
+type LazyWorker struct {
+	contracts.Implements[Worker]
+}
+
+func (l *LazyWorker) Work() string {
+	return "working smart"
+}
+
+type BrokenWorker struct {
+	contracts.Implements[Worker]
+}
+
+func TestContainer_ProvideWithContracts(t *testing.T) {
+	c := New()
+
+	t.Run("Valid implementation", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Provide should not panic for valid worker: %v", r)
+			}
+		}()
+		c.Provide("good", &GoodWorker{})
+	})
+
+	t.Run("Invalid implementation panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Provide should panic for broken worker")
+			}
+		}()
+		c.Provide("broken", &BrokenWorker{})
+	})
+}
+
+func TestResolveAll(t *testing.T) {
+	c := New()
+	c.Provide("good", &GoodWorker{})
+	c.Provide("lazy", &LazyWorker{})
+	c.Provide("other", "not a worker")
+
+	workers := ResolveAll[Worker](c)
+	if len(workers) != 2 {
+		t.Fatalf("expected 2 workers, got %d", len(workers))
+	}
+
+	foundGood := false
+	foundLazy := false
+	for _, w := range workers {
+		switch w.Work() {
+		case "working hard":
+			foundGood = true
+		case "working smart":
+			foundLazy = true
+		}
+	}
+
+	if !foundGood || !foundLazy {
+		t.Error("ResolveAll did not find all expected workers")
+	}
+}
+
+func TestContainer_Scope(t *testing.T) {
+	c := New()
+	c.Provide("shared", "value")
+
+	child := c.Scope()
+	if !child.Has("shared") {
+		t.Error("child should inherit named deps from parent")
+	}
+}
+
+func TestContainer_ProvideLazy(t *testing.T) {
+	c := New()
+	called := 0
+	c.ProvideLazy("lazy", func() any {
+		called++
+		return "computed"
+	})
+
+	if called != 0 {
+		t.Error("lazy factory should not be called on registration")
+	}
+
+	v, ok := c.Get("lazy")
+	if !ok {
+		t.Fatal("expected to find 'lazy'")
+	}
+	if v != "computed" {
+		t.Errorf("got %v, want %q", v, "computed")
+	}
+	if called != 1 {
+		t.Error("lazy factory should be called once on first access")
+	}
+
+	v2, _ := c.Get("lazy")
+	if v2 != "computed" {
+		t.Error("lazy factory should return cached value")
+	}
+	if called != 1 {
+		t.Error("lazy factory should only be called once")
+	}
 }
