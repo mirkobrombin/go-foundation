@@ -2,7 +2,7 @@ package hosting
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,18 +11,13 @@ import (
 )
 
 type fakeSvc struct {
-	mu      sync.Mutex
-	running bool
+	running atomic.Bool
 }
 
 func (f *fakeSvc) Execute(ctx context.Context) error {
-	f.mu.Lock()
-	f.running = true
-	f.mu.Unlock()
+	f.running.Store(true)
 	<-ctx.Done()
-	f.mu.Lock()
-	f.running = false
-	f.mu.Unlock()
+	f.running.Store(false)
 	return nil
 }
 
@@ -89,13 +84,14 @@ func TestHost_Lifecycle(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	if !svc.running {
+	if !svc.running.Load() {
 		t.Error("service should be running")
 	}
 
 	cancel()
 	<-done
-	if svc.running {
+	time.Sleep(20 * time.Millisecond)
+	if svc.running.Load() {
 		t.Error("service should have shut down")
 	}
 }
