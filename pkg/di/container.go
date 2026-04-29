@@ -70,6 +70,26 @@ func Register[T any](b *Builder, factory func() T, lifetime ...Lifetime) {
 	b.mu.Unlock()
 }
 
+// RegisterAs adds a service registering by interface type T.
+func RegisterAs[T any](b *Builder, factory func() T, lifetime ...Lifetime) {
+	lt := Singleton
+	if len(lifetime) > 0 {
+		lt = lifetime[0]
+	}
+	typ := reflect.TypeOf((*T)(nil)).Elem()
+	b.mu.Lock()
+	b.services[typ] = &serviceEntry{lifetime: lt, factory: factory}
+	b.mu.Unlock()
+}
+
+// RegisterInstance adds an already-created instance as a singleton.
+func RegisterInstance[T any](b *Builder, instance T) {
+	typ := reflect.TypeOf((*T)(nil)).Elem()
+	b.mu.Lock()
+	b.services[typ] = &serviceEntry{lifetime: Singleton, factory: func() T { return instance }, built: true, instance: instance}
+	b.mu.Unlock()
+}
+
 // Build creates a Container from the registered services.
 func (b *Builder) Build() *Container {
 	c := New()

@@ -18,8 +18,8 @@
 
 | Package | Description |
 |---------|-------------|
-| `hosting` | Application host with graceful shutdown |
-| `srv` | Minimal API server with routing, middleware, model binding |
+| `hosting` | Application host with ConfigureServices / ConfigureWeb / DI / auto-start |
+| `srv` | Minimal API server with routing, middleware, model binding, auth, validation, rate limit |
 | `di` | Typed dependency injection (Singleton/Scoped/Transient) |
 | `configuration` | Multi-source config (env, file, flags) |
 | `options` | Functional options, `Options[T]`, merge, validation |
