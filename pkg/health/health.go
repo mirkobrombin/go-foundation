@@ -10,8 +10,11 @@ import (
 type Status int
 
 const (
-	StatusHealthy   Status = iota
+	// StatusHealthy indicates a component is fully operational.
+	StatusHealthy Status = iota
+	// StatusDegraded indicates a component is operating with reduced capability.
 	StatusDegraded
+	// StatusUnhealthy indicates a component is not functioning.
 	StatusUnhealthy
 )
 

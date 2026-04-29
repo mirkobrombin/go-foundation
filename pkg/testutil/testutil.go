@@ -26,7 +26,11 @@ func NewTestHost(setup func(b *di.Builder, app *srv.Server)) *TestHost {
 	app := srv.New()
 	setup(b, app)
 
-	container := b.Build()
+	container, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	_ = err
 	ts := httptest.NewServer(app)
 
 	return &TestHost{

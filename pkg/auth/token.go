@@ -16,10 +16,14 @@ import (
 )
 
 var (
-	ErrInvalidToken     = errors.New("auth: invalid token")
+	// ErrInvalidToken indicates a malformed or unreadable token.
+	ErrInvalidToken = errors.New("auth: invalid token")
+	// ErrInvalidSignature indicates the token signature verification failed.
 	ErrInvalidSignature = errors.New("auth: invalid signature")
-	ErrExpiredToken     = errors.New("auth: token expired")
-	ErrUnknownKeyID     = errors.New("auth: unknown key id")
+	// ErrExpiredToken indicates the token has passed its expiration time.
+	ErrExpiredToken = errors.New("auth: token expired")
+	// ErrUnknownKeyID indicates the key ID in the token is not recognized.
+	ErrUnknownKeyID = errors.New("auth: unknown key id")
 )
 
 // Payload holds the claims for a simple token.
@@ -61,10 +65,14 @@ func (c StandardClaims) Valid() error {
 type Algorithm string
 
 const (
+	// AlgHMACSHA256 signs tokens using HMAC-SHA256.
 	AlgHMACSHA256 Algorithm = "HS256"
-	AlgRS256      Algorithm = "RS256"
-	AlgES256      Algorithm = "ES256"
-	AlgEdDSA      Algorithm = "EdDSA"
+	// AlgRS256 signs tokens using RSA-PKCS1v15 with SHA-256.
+	AlgRS256 Algorithm = "RS256"
+	// AlgES256 signs tokens using ECDSA with P-256 and SHA-256.
+	AlgES256 Algorithm = "ES256"
+	// AlgEdDSA signs tokens using Ed25519.
+	AlgEdDSA Algorithm = "EdDSA"
 )
 
 // SignToken signs a payload with HMAC-SHA256.

@@ -21,6 +21,7 @@ func cloneRequest(r *http.Request) *http.Request {
 	return cloned
 }
 
+// Header returns a Middleware that sets the specified header on every request.
 func Header(key, value string) Middleware {
 	return func(next http.RoundTripper) http.RoundTripper {
 		return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
@@ -31,6 +32,7 @@ func Header(key, value string) Middleware {
 	}
 }
 
+// Logging returns a Middleware that logs each request and its duration.
 func Logging(logger *slog.Logger) Middleware {
 	return func(next http.RoundTripper) http.RoundTripper {
 		return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
@@ -47,6 +49,7 @@ func Logging(logger *slog.Logger) Middleware {
 	}
 }
 
+// RequestID returns a Middleware that injects a unique request ID into the given header if absent.
 func RequestID(header string) Middleware {
 	return func(next http.RoundTripper) http.RoundTripper {
 		return roundTripperFunc(func(r *http.Request) (*http.Response, error) {

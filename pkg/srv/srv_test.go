@@ -148,3 +148,139 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("health: got %d, want 200", w.Code)
 	}
 }
+
+// --- M3: Constraint, catch-all, method multiplex tests ---
+
+func TestServer_IntConstraint(t *testing.T) {
+	s := New()
+	s.MapGet("/users/{id:int}", func(ctx *Context) error {
+		return ctx.JSON(200, map[string]string{"id": ctx.Params["id"]})
+	})
+
+	req := httptest.NewRequest("GET", "/users/42", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("int constraint valid: got %d, want 200", w.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/users/abc", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("int constraint invalid: got %d, want 404", w.Code)
+	}
+}
+
+func TestServer_AlphaConstraint(t *testing.T) {
+	s := New()
+	s.MapGet("/items/{slug:alpha}", func(ctx *Context) error {
+		return ctx.JSON(200, map[string]string{"slug": ctx.Params["slug"]})
+	})
+
+	req := httptest.NewRequest("GET", "/items/hello", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("alpha constraint valid: got %d, want 200", w.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/items/hello123", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("alpha constraint invalid: got %d, want 404", w.Code)
+	}
+}
+
+func TestServer_CatchAll(t *testing.T) {
+	s := New()
+	s.MapGet("/static/{*filepath}", func(ctx *Context) error {
+		return ctx.JSON(200, map[string]string{"path": ctx.Params["filepath"]})
+	})
+
+	req := httptest.NewRequest("GET", "/static/css/main.css", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("catch-all: got %d, want 200", w.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "css/main.css" {
+		t.Errorf("catch-all path: got %q, want %q", resp["path"], "css/main.css")
+	}
+
+	req = httptest.NewRequest("GET", "/static/a/b/c/d", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("deep catch-all: got %d, want 200", w.Code)
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "a/b/c/d" {
+		t.Errorf("deep catch-all: got %q, want %q", resp["path"], "a/b/c/d")
+	}
+}
+
+func TestServer_MethodMultiplex(t *testing.T) {
+	s := New()
+	s.MapGet("/items/{id}", func(ctx *Context) error {
+		return ctx.JSON(200, map[string]string{"method": "GET"})
+	})
+	s.MapPost("/items/{id}", func(ctx *Context) error {
+		return ctx.JSON(201, map[string]string{"method": "POST"})
+	})
+	s.MapDelete("/items/{id}", func(ctx *Context) error {
+		return ctx.JSON(200, map[string]string{"method": "DELETE"})
+	})
+
+	req := httptest.NewRequest("GET", "/items/1", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("GET: got %d, want 200", w.Code)
+	}
+
+	req = httptest.NewRequest("POST", "/items/1", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Errorf("POST: got %d, want 201", w.Code)
+	}
+
+	req = httptest.NewRequest("DELETE", "/items/1", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("DELETE: got %d, want 200", w.Code)
+	}
+
+	req = httptest.NewRequest("PUT", "/items/1", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("PUT not registered: got %d, want 404", w.Code)
+	}
+}
+
+func TestServer_RegexConstraint(t *testing.T) {
+	s := New()
+	s.MapGet("/files/{name:regex(^[a-z]+\\.txt$)}", func(ctx *Context) error {
+		return ctx.JSON(200, map[string]string{"name": ctx.Params["name"]})
+	})
+
+	req := httptest.NewRequest("GET", "/files/readme.txt", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("regex valid: got %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/files/README.TXT", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("regex invalid: got %d, want 404", w.Code)
+	}
+}

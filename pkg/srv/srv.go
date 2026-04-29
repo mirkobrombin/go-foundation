@@ -4,8 +4,12 @@ package srv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,7 +60,58 @@ func (c *Context) Bind(v any) error {
 	if strings.Contains(ct, "application/json") {
 		return json.NewDecoder(c.Request.Body).Decode(v)
 	}
+	if strings.Contains(ct, "application/x-www-form-urlencoded") {
+		if err := c.Request.ParseForm(); err != nil {
+			return fmt.Errorf("srv: cannot parse form: %w", err)
+		}
+		return bindForm(c.Request.Form, v)
+	}
 	return fmt.Errorf("srv: unsupported content type: %s", ct)
+}
+
+func bindForm(form map[string][]string, v any) error {
+	val := reflect.ValueOf(v)
+	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("srv: form binding requires pointer to struct")
+	}
+	elem := val.Elem()
+	for i := 0; i < elem.NumField(); i++ {
+		field := elem.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+		fieldName := elem.Type().Field(i).Name
+		jsonTag := elem.Type().Field(i).Tag.Get("json")
+		if jsonTag != "" {
+			parts := strings.Split(jsonTag, ",")
+			if parts[0] != "" && parts[0] != "-" {
+				fieldName = parts[0]
+			}
+		}
+		if vals, ok := form[fieldName]; ok && len(vals) > 0 {
+			setFieldValue(field, vals[0])
+		}
+	}
+	return nil
+}
+
+func setFieldValue(field reflect.Value, value string) {
+	switch field.Kind() {
+	case reflect.String:
+		field.SetString(value)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if n, err := strconv.ParseInt(value, 10, 64); err == nil {
+			field.SetInt(n)
+		}
+	case reflect.Float32, reflect.Float64:
+		if n, err := strconv.ParseFloat(value, 64); err == nil {
+			field.SetFloat(n)
+		}
+	case reflect.Bool:
+		if b, err := strconv.ParseBool(value); err == nil {
+			field.SetBool(b)
+		}
+	}
 }
 
 // HandlerFunc is the handler signature for srv routes.
@@ -78,6 +133,7 @@ type Server struct {
 	groups     []*group
 	mu         sync.RWMutex
 	server     *http.Server
+	tree       *radixTree
 }
 
 // Option configures a Server.
@@ -85,7 +141,9 @@ type Option = options.Option[Server]
 
 // New creates a new Server with optional configuration.
 func New(opts ...Option) *Server {
-	s := &Server{}
+	s := &Server{
+		tree: newRadixTree(),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -155,8 +213,10 @@ func (s *Server) MapDelete(path string, handler HandlerFunc, mw ...Middleware) {
 }
 
 func (s *Server) addRoute(method, path string, handler HandlerFunc, mw ...Middleware) {
+	chained := chainMiddleware(handler, mw...)
 	s.mu.Lock()
-	s.routes = append(s.routes, route{method: method, path: path, handler: chainMiddleware(handler, append(s.middleware, mw...)...)})
+	s.routes = append(s.routes, route{method: method, path: path, handler: chained})
+	s.tree.insert(method, path, chained)
 	s.mu.Unlock()
 }
 
@@ -174,66 +234,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copy(globalMW, s.middleware)
 	s.mu.RUnlock()
 
-	h := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.serveRoutes(w, r)
-	}))
+	ctx := &Context{Request: r, Response: w, Ctx: r.Context()}
+	ctx.values = make(map[string]any)
 
-	for i := len(globalMW) - 1; i >= 0; i-- {
-		mw := globalMW[i]
-		next := h
-		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := &Context{Request: r, Response: w, Ctx: r.Context(), values: make(map[string]any)}
-			responded := false
-			nextFn := func(c *Context) error {
-				responded = true
-				next.ServeHTTP(c.Response, c.Request)
-				return nil
-			}
-			if err := mw(nextFn)(ctx); err != nil {
-				if !responded {
-					w.Header().Set("Content-Type", "application/json; charset=utf-8")
-					w.WriteHeader(statusFromError(err))
-					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-				}
-			}
-		})
+	handler := func(c *Context) error {
+		s.serveRoutesWithContext(c)
+		return nil
 	}
-	h.ServeHTTP(w, r)
+
+	wrapped := chainMiddleware(handler, globalMW...)
+	if err := wrapped(ctx); err != nil {
+		ctx.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
+		ctx.Response.WriteHeader(statusFromError(err))
+		json.NewEncoder(ctx.Response).Encode(map[string]string{"error": err.Error()})
+	}
 }
 
-func (s *Server) serveRoutes(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	routes := make([]route, len(s.routes))
-	copy(routes, s.routes)
-	s.mu.RUnlock()
-
-	for _, rt := range routes {
-		if rt.method != r.Method {
-			continue
-		}
-		params, ok := matchRoute(rt.path, r.URL.Path)
-		if !ok {
-			continue
-		}
-
-		ctx := &Context{
-			Request:  r,
-			Response: w,
-			Params:  params,
-			Ctx:     r.Context(),
-		}
-
-		if err := rt.handler(ctx); err != nil {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		}
+func (s *Server) serveRoutesWithContext(ctx *Context) {
+	handler, params := s.tree.lookup(ctx.Request.Method, ctx.Request.URL.Path)
+	if handler == nil {
+		ctx.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
+		ctx.Response.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(ctx.Response).Encode(map[string]string{"error": "not found"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+	ctx.Params = params
+
+	if err := handler(ctx); err != nil {
+		ctx.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
+		ctx.Response.WriteHeader(statusFromError(err))
+		json.NewEncoder(ctx.Response).Encode(map[string]string{"error": err.Error()})
+	}
 }
 
 func matchRoute(pattern, path string) (map[string]string, bool) {
@@ -307,13 +339,36 @@ func (e *httpError) HTTPCode() int {
 	return e.Code
 }
 
-// Recovery returns middleware that catches panics and converts them to errors.
+type panicError struct {
+	recovered   any
+	stack       string
+}
+
+func (e *panicError) Error() string {
+	return fmt.Sprintf("panic: %v\n%s", e.recovered, e.stack)
+}
+
+func (e *panicError) HTTPCode() int {
+	return http.StatusInternalServerError
+}
+
+func (e *panicError) Unwrap() error {
+	if err, ok := e.recovered.(error); ok {
+		return err
+	}
+	return nil
+}
+
+// Recovery returns middleware that catches panics and converts them to errors with stack traces.
 func Recovery() Middleware {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(ctx *Context) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
-					err = fmt.Errorf("panic: %v", r)
+					err = &panicError{
+						recovered: r,
+						stack:     string(debug.Stack()),
+					}
 				}
 			}()
 			return next(ctx)
@@ -392,8 +447,15 @@ func statusFromError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	if he, ok := err.(*httpError); ok {
-		return he.Code
+	for {
+		if he, ok := err.(interface{ HTTPCode() int }); ok {
+			return he.HTTPCode()
+		}
+		if e := errors.Unwrap(err); e != nil {
+			err = e
+			continue
+		}
+		break
 	}
 	return http.StatusInternalServerError
 }

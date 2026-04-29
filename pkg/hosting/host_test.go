@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mirkobrombin/go-foundation/pkg/di"
+	"github.com/mirkobrombin/go-foundation/pkg/health"
 	"github.com/mirkobrombin/go-foundation/pkg/srv"
 )
 
@@ -93,5 +94,172 @@ func TestHost_Lifecycle(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if svc.running.Load() {
 		t.Error("service should have shut down")
+	}
+}
+
+// --- M7 tests ---
+
+type fakeHosted struct {
+	started atomic.Bool
+	stopped atomic.Bool
+	startErr error
+}
+
+func (f *fakeHosted) Start(_ context.Context) error {
+	if f.startErr != nil {
+		return f.startErr
+	}
+	f.started.Store(true)
+	return nil
+}
+
+func (f *fakeHosted) Stop(_ context.Context) error {
+	f.stopped.Store(true)
+	return nil
+}
+
+func TestHostedService_Lifecycle(t *testing.T) {
+	svc := &fakeHosted{}
+	host := NewBuilder().AddHostedService(svc).Build()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		host.Run(ctx)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if !svc.started.Load() {
+		t.Error("hosted service should be started")
+	}
+
+	cancel()
+	<-done
+
+	if !svc.stopped.Load() {
+		t.Error("hosted service should be stopped")
+	}
+}
+
+func TestHostedService_StartupFailure(t *testing.T) {
+	failSvc := &fakeHosted{startErr: context.DeadlineExceeded}
+	host := NewBuilder().AddHostedService(failSvc).Build()
+
+	err := host.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error from startup failure")
+	}
+}
+
+func TestHost_StartupTimeout(t *testing.T) {
+	slowSvc := &slowHosted{}
+	host := NewBuilder().
+		AddHostedService(slowSvc).
+		WithStartupTimeout(100*time.Millisecond).
+		Build()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- host.Run(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Run to return")
+	}
+}
+
+type slowHosted struct{}
+
+func (s *slowHosted) Start(ctx context.Context) error {
+	select {
+	case <-time.After(5 * time.Second):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (s *slowHosted) Stop(_ context.Context) error { return nil }
+
+func TestHost_State(t *testing.T) {
+	host := NewBuilder().Build()
+	if host.State() != HostStarting {
+		t.Errorf("initial state = %v, want Starting", host.State())
+	}
+}
+
+func TestHost_AddHostedService(t *testing.T) {
+	svc := &fakeHosted{}
+	host := &Host{}
+	host.AddHostedService(svc)
+	if len(host.hostedServices) != 1 {
+		t.Fatalf("expected 1 hosted service, got %d", len(host.hostedServices))
+	}
+}
+
+func TestBackgroundServiceAdapter(t *testing.T) {
+	fake := &fakeSvc{}
+	adapter := &BackgroundServiceAdapter{Svc: fake}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- adapter.Start(ctx)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	err := <-errCh
+	if err != nil && err != context.Canceled {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestHost_WithHealthRegistry_ReadyEndpoint(t *testing.T) {
+	reg := health.NewRegistry()
+	reg.Register("db", &testChecker{status: health.StatusHealthy})
+
+	h := NewBuilder().
+		ConfigureWeb(func(s *srv.Server) {}).
+		WithHealthRegistry(reg).
+		WithAddr(":0").
+		Build()
+
+	if h.Server == nil {
+		t.Fatal("Server should be set")
+	}
+}
+
+type testChecker struct {
+	status health.Status
+}
+
+func (c *testChecker) Check(_ context.Context) health.Report {
+	return health.Report{Status: c.status}
+}
+
+func TestHost_ShutdownTimeout(t *testing.T) {
+	b := NewBuilder().WithShutdownTimeout(5 * time.Second)
+	if b.shutdownTimeout != 5*time.Second {
+		t.Errorf("timeout = %v, want 5s", b.shutdownTimeout)
+	}
+}
+
+func TestHost_DefaultStartupTimeout(t *testing.T) {
+	b := NewBuilder()
+	if b.startupTimeout != 15*time.Second {
+		t.Errorf("default startup timeout = %v, want 15s", b.startupTimeout)
 	}
 }

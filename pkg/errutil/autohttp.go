@@ -25,7 +25,7 @@ func AutoHTTP(next http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				w.WriteHeader(http.StatusInternalServerError)
 
-				fmt.Fprintf(w, "500 – Internal Server Error\n\n")
+				fmt.Fprintf(w, "500 - Internal Server Error\n\n")
 				fmt.Fprintf(w, "panic: %v\n\n", rec)
 				fmt.Fprintf(w, "Request: %s %s\n\n", r.Method, r.URL.String())
 

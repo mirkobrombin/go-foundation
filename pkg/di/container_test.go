@@ -1,6 +1,7 @@
 package di
 
 import (
+	"io"
 	"testing"
 
 	"github.com/mirkobrombin/go-foundation/pkg/contracts"
@@ -144,13 +145,11 @@ func TestMustResolve_Panic(t *testing.T) {
 	MustResolve[int](c, "missing")
 }
 
-// --- Builder / Register / ResolveType tests ---
-
 func TestBuilder_RegisterAndResolveType(t *testing.T) {
 	b := NewBuilder()
 	Register(b, func() *testDB { return &testDB{Name: "built"} })
 
-	c := b.Build()
+	c := b.MustBuild()
 	db := ResolveType[*testDB](c)
 	if db.Name != "built" {
 		t.Errorf("got %q, want %q", db.Name, "built")
@@ -161,7 +160,7 @@ func TestBuilder_TransientLifetime(t *testing.T) {
 	b := NewBuilder()
 	Register(b, func() *testDB { return &testDB{Name: "fresh"} }, Transient)
 
-	c := b.Build()
+	c := b.MustBuild()
 	a := ResolveType[*testDB](c)
 	b2 := ResolveType[*testDB](c)
 	if a == b2 {
@@ -173,7 +172,7 @@ func TestBuilder_SingletonLifetime(t *testing.T) {
 	b := NewBuilder()
 	Register(b, func() *testDB { return &testDB{Name: "singleton"} }, Singleton)
 
-	c := b.Build()
+	c := b.MustBuild()
 	a := ResolveType[*testDB](c)
 	b2 := ResolveType[*testDB](c)
 	if a != b2 {
@@ -183,7 +182,7 @@ func TestBuilder_SingletonLifetime(t *testing.T) {
 
 func TestResolveType_PanicOnMissing(t *testing.T) {
 	b := NewBuilder()
-	c := b.Build()
+	c := b.MustBuild()
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -198,7 +197,7 @@ func TestBuilder_ProvideNamed(t *testing.T) {
 	b := NewBuilder()
 	b.Provide("db", &testDB{Name: "named"})
 
-	c := b.Build()
+	c := b.MustBuild()
 	got, ok := c.Get("db")
 	if !ok {
 		t.Fatal("expected named dep 'db'")
@@ -208,8 +207,6 @@ func TestBuilder_ProvideNamed(t *testing.T) {
 		t.Errorf("got %q, want %q", db.Name, "named")
 	}
 }
-
-// --- Contracts tests (merged from contracts_test.go) ---
 
 type Worker interface {
 	Work() string
@@ -325,3 +322,104 @@ func TestContainer_ProvideLazy(t *testing.T) {
 		t.Error("lazy factory should only be called once")
 	}
 }
+
+// --- M1: RegisterFromFunc tests ---
+
+type Config struct {
+	DSN string
+}
+
+type UserService struct {
+	DB  *testDB
+	Cfg *Config
+}
+
+func NewUserService(db *testDB, cfg *Config) UserService {
+	return UserService{DB: db, Cfg: cfg}
+}
+
+func TestRegisterFromFunc(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *testDB { return &testDB{Name: "pg"} })
+	Register(b, func() *Config { return &Config{DSN: "host=localhost"} })
+	RegisterFromFunc[UserService](b, NewUserService, Scoped)
+
+	c := b.MustBuild()
+	svc := ResolveType[UserService](c)
+	if svc.DB.Name != "pg" {
+		t.Errorf("DB.Name = %q, want %q", svc.DB.Name, "pg")
+	}
+	if svc.Cfg.DSN != "host=localhost" {
+		t.Errorf("Cfg.DSN = %q, want %q", svc.Cfg.DSN, "host=localhost")
+	}
+}
+
+func TestRegisterFromFunc_MissingDep(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *testDB { return &testDB{Name: "pg"} })
+	RegisterFromFunc[UserService](b, NewUserService, Scoped)
+
+	_, err := b.Build()
+	if err == nil {
+		t.Fatal("expected build error for missing Config dependency")
+	}
+}
+
+// --- M1: Scoped disposal tests ---
+
+type closableService struct {
+	closed bool
+}
+
+func (c *closableService) Close() error {
+	c.closed = true
+	return nil
+}
+
+func TestScopedContainer_Close(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *closableService { return &closableService{} }, Scoped)
+
+	c := b.MustBuild()
+	scope := c.Scope()
+	svc := ResolveType[*closableService](scope)
+	if svc.closed {
+		t.Error("service should not be closed yet")
+	}
+	if err := scope.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !svc.closed {
+		t.Error("service should be closed after scope.Close()")
+	}
+}
+
+func TestContainer_Close_Singleton(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *closableService { return &closableService{} }, Singleton)
+
+	c := b.MustBuild()
+	svc := ResolveType[*closableService](c)
+	if svc.closed {
+		t.Error("service should not be closed yet")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !svc.closed {
+		t.Error("singleton implementing io.Closer should be closed on container close")
+	}
+}
+
+func TestContainer_Close_NonCloser(t *testing.T) {
+	b := NewBuilder()
+	Register(b, func() *testDB { return &testDB{Name: "ok"} })
+
+	c := b.MustBuild()
+	ResolveType[*testDB](c)
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close on non-closer should not error: %v", err)
+	}
+}
+
+var _ io.Closer = (*closableService)(nil)

@@ -15,8 +15,11 @@ type State int
 
 // Circuit breaker states.
 const (
+	// StateClosed allows all requests through.
 	StateClosed State = iota
+	// StateOpen rejects all requests until the timeout elapses.
 	StateOpen
+	// StateHalfOpen allows a single probe request to test recovery.
 	StateHalfOpen
 )
 

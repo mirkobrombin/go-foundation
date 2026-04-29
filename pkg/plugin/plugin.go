@@ -4,9 +4,12 @@ package plugin
 import "errors"
 
 var (
+	// ErrAlreadyRegistered indicates a plugin with the same name is already registered.
 	ErrAlreadyRegistered = errors.New("plugin: already registered")
-	ErrFactoryExists     = errors.New("plugin: factory already exists")
-	ErrFactoryNotFound   = errors.New("plugin: factory not found")
+	// ErrFactoryExists indicates a factory for the given name already exists.
+	ErrFactoryExists = errors.New("plugin: factory already exists")
+	// ErrFactoryNotFound indicates no factory exists for the requested name.
+	ErrFactoryNotFound = errors.New("plugin: factory not found")
 )
 
 // Plugin defines the lifecycle interface for all plugins.

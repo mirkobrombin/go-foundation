@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -18,8 +19,11 @@ type Handler[T any] func(ctx context.Context, event T) error
 type Priority int
 
 const (
+	// PriorityHigh runs the handler before normal and low priority.
 	PriorityHigh   Priority = 100
+	// PriorityNormal is the default priority.
 	PriorityNormal Priority = 0
+	// PriorityLow runs the handler after all others.
 	PriorityLow    Priority = -100
 )
 
@@ -27,21 +31,45 @@ const (
 type DispatchStrategy int
 
 const (
+	// StopOnFirstError stops dispatch on the first handler error.
 	StopOnFirstError DispatchStrategy = iota
+	// BestEffort continues dispatch even if handlers fail.
 	BestEffort
 )
 
 // Middleware wraps event dispatch with cross-cutting behavior.
 type Middleware func(ctx context.Context, event any, next func(ctx context.Context, event any) error) error
 
-// Bus is a type-safe event bus with priorities, wildcards, and middleware.
+type asyncEvent struct {
+	event any
+	emit  func(ctx context.Context, event any) error
+}
+
+// OverflowStrategy controls behavior when the async channel is full.
+type OverflowStrategy int
+
+const (
+	// OverflowBlock blocks the emitter until space is available.
+	OverflowBlock OverflowStrategy = iota
+	// OverflowDropOldest discards the oldest queued event.
+	OverflowDropOldest
+	// OverflowFail returns an error immediately.
+	OverflowFail
+)
+
+// Bus is the event bus that dispatches events to registered handlers.
 type Bus struct {
-	subscribers  *safemap.Map[reflect.Type, []subscriber]
-	strategy     DispatchStrategy
-	middlewares  []Middleware
-	onAsyncError func(error)
-	wildcard     []subscriber
-	mu           sync.RWMutex
+	subscribers    *safemap.Map[reflect.Type, []subscriber]
+	strategy       DispatchStrategy
+	middlewares    []Middleware
+	onAsyncError   func(error)
+	wildcard       []subscriber
+	mu             sync.RWMutex
+
+	asyncCh        chan asyncEvent
+	asyncClose     chan struct{}
+	overflowStrat  OverflowStrategy
+	bufferSize     int
 }
 
 type subscriber struct {
@@ -51,7 +79,7 @@ type subscriber struct {
 
 var defaultBus = New()
 
-// Default returns the package-level default event bus.
+// Default returns the package-level default Bus.
 func Default() *Bus {
 	return defaultBus
 }
@@ -59,14 +87,58 @@ func Default() *Bus {
 // Option configures a Bus.
 type Option = options.Option[Bus]
 
-// New creates a new event Bus with the given options.
+// New creates a new Bus with the given options.
 func New(opts ...Option) *Bus {
 	b := &Bus{
-		subscribers: safemap.New[reflect.Type, []subscriber](),
-		strategy:    StopOnFirstError,
+		subscribers:   safemap.New[reflect.Type, []subscriber](),
+		strategy:      StopOnFirstError,
+		asyncCh:       make(chan asyncEvent, 1024),
+		asyncClose:    make(chan struct{}),
+		bufferSize:    1024,
+		overflowStrat: OverflowBlock,
 	}
+	go b.asyncProcessor()
 	options.Apply(b, opts...)
 	return b
+}
+
+// WithBufferSize sets the async channel buffer size.
+func WithBufferSize(n int) Option {
+	return func(b *Bus) {
+		b.bufferSize = n
+		b.asyncCh = make(chan asyncEvent, n)
+	}
+}
+
+// WithOverflowStrategy sets the overflow behavior for async events.
+func WithOverflowStrategy(s OverflowStrategy) Option {
+	return func(b *Bus) { b.overflowStrat = s }
+}
+
+func (b *Bus) asyncProcessor() {
+	for {
+		select {
+		case <-b.asyncClose:
+			return
+		case evt, ok := <-b.asyncCh:
+			if !ok {
+				return
+			}
+			if err := evt.emit(context.Background(), evt.event); err != nil {
+				b.mu.RLock()
+				fn := b.onAsyncError
+				b.mu.RUnlock()
+				if fn != nil {
+					fn(err)
+				}
+			}
+		}
+	}
+}
+
+// Close shuts down the async event processor.
+func (b *Bus) Close() {
+	close(b.asyncClose)
 }
 
 // WithStrategy sets the dispatch strategy for the Bus.
@@ -171,21 +243,54 @@ func Emit[T any](ctx context.Context, b *Bus, event T) error {
 	return nil
 }
 
-// EmitAsync dispatches an event in a goroutine. Errors are sent to OnAsyncError.
+// EmitAsync dispatches an event asynchronously to the bus channel.
 func EmitAsync[T any](ctx context.Context, b *Bus, event T) {
 	if b == nil {
 		b = defaultBus
 	}
-	go func() {
-		if err := Emit(ctx, b, event); err != nil {
-			b.mu.RLock()
-			fn := b.onAsyncError
-			b.mu.RUnlock()
-			if fn != nil {
-				fn(err)
+	evt := asyncEvent{
+		event: event,
+		emit: func(ctx context.Context, evt any) error {
+			key := reflect.TypeFor[T]()
+			subs, ok := b.subscribers.Get(key)
+			if !ok {
+				return nil
+			}
+			for _, sub := range subs {
+				if fn, ok := sub.handler.(Handler[T]); ok {
+					if err := fn(ctx, evt.(T)); err != nil {
+						if b.strategy == StopOnFirstError {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		},
+	}
+
+	switch b.overflowStrat {
+	case OverflowBlock:
+		b.asyncCh <- evt
+	case OverflowDropOldest:
+		select {
+		case b.asyncCh <- evt:
+		default:
+			select {
+			case <-b.asyncCh:
+			default:
+			}
+			b.asyncCh <- evt
+		}
+	case OverflowFail:
+		select {
+		case b.asyncCh <- evt:
+		default:
+			if b.onAsyncError != nil {
+				b.onAsyncError(fmt.Errorf("events: async channel full, event dropped"))
 			}
 		}
-	}()
+	}
 }
 
 func applyMiddleware(handler func(ctx context.Context, evt any) error, middlewares []Middleware) func(ctx context.Context, evt any) error {

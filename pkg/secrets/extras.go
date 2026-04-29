@@ -74,6 +74,7 @@ type PrefixStore struct {
 	prefix string
 }
 
+// NewPrefixStore wraps a Store and prepends the given prefix to all keys.
 func NewPrefixStore(store Store, prefix string) *PrefixStore {
 	return &PrefixStore{store: store, prefix: prefix}
 }
@@ -96,6 +97,7 @@ type FallbackStore struct {
 	secondary Store
 }
 
+// NewFallbackStore creates a store that tries primary first, then falls back to secondary.
 func NewFallbackStore(primary, secondary Store) *FallbackStore {
 	return &FallbackStore{primary: primary, secondary: secondary}
 }

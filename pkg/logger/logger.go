@@ -14,10 +14,15 @@ type Level int
 
 // Log levels in ascending order of severity.
 const (
+	// DebugLevel logs detailed diagnostic information.
 	DebugLevel Level = iota
+	// InfoLevel logs general operational messages.
 	InfoLevel
+	// WarnLevel logs potential problems.
 	WarnLevel
+	// ErrorLevel logs error conditions.
 	ErrorLevel
+	// FatalLevel logs severe errors that should terminate the process.
 	FatalLevel
 )
 
@@ -55,6 +60,7 @@ type Entry struct {
 	SpanID    string                 `json:"span_id,omitempty"`
 }
 
+// Sink receives log entries for processing.
 type Sink interface {
 	Log(e Entry) error
 }

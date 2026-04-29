@@ -2,94 +2,193 @@ package hosting
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/mirkobrombin/go-foundation/pkg/di"
+	"github.com/mirkobrombin/go-foundation/pkg/health"
 	"github.com/mirkobrombin/go-foundation/pkg/srv"
 )
 
-// Host manages the lifecycle of the application: startup, running state, and
-// graceful shutdown. It coordinates one or more BackgroundService instances.
-//
-// When ConfigureServices and/or ConfigureWeb are used, the Host also owns the
-// DI container and the web server.
-type Host struct {
-	services  []BackgroundService
-	onStart   []func()
-	onStop    []func()
-	Container *di.Container
-	Server    *srv.Server
-	cancel    context.CancelFunc
-	mu        sync.RWMutex
+// HostState represents the current lifecycle state of a Host.
+type HostState int32
+
+const (
+	// HostStarting indicates the host is starting hosted services.
+	HostStarting HostState = iota
+	// HostRunning indicates the host is fully running.
+	HostRunning
+	// HostStopping indicates the host is shutting down.
+	HostStopping
+	// HostStopped indicates the host has finished shutting down.
+	HostStopped
+)
+
+func (s HostState) String() string {
+	switch s {
+	case HostStarting:
+		return "starting"
+	case HostRunning:
+		return "running"
+	case HostStopping:
+		return "stopping"
+	case HostStopped:
+		return "stopped"
+	default:
+		return "unknown"
+	}
 }
 
-// BackgroundService is the interface that every long-running service must
-// implement. The Execute method is called when the host starts and the
-// service is expected to run until ctx is cancelled.
-//
-// Example:
-//
-//	type MyService struct{}
-//	func (s *MyService) Execute(ctx context.Context) error {
-//	    <-ctx.Done()
-//	    return nil
-//	}
+// Host manages the lifecycle of the application.
+type Host struct {
+	services        []BackgroundService
+	hostedServices  []HostedService
+	onStart         []func()
+	onStop          []func()
+	Container       *di.Container
+	Server          *srv.Server
+	HealthRegistry  *health.Registry
+	cancel          context.CancelFunc
+	mu              sync.RWMutex
+	state           atomic.Int32
+	ShutdownTimeout time.Duration
+	startupTimeout  time.Duration
+}
+
+// BackgroundService is a long-running service started in parallel.
 type BackgroundService interface {
-	// Execute runs the service. The context is cancelled when the host
-	// is shutting down; the service should return promptly.
 	Execute(ctx context.Context) error
 }
 
-// Run starts all registered services and blocks until a shutdown signal
-// (SIGINT / SIGTERM) is received or until all services return.
+// HostedService is a managed lifecycle service with explicit Start/Stop.
+type HostedService interface {
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+}
+
+// BackgroundServiceAdapter wraps a BackgroundService as a HostedService.
+type BackgroundServiceAdapter struct {
+	Svc BackgroundService
+}
+
+func (a *BackgroundServiceAdapter) Start(ctx context.Context) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.Svc.Execute(ctx)
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *BackgroundServiceAdapter) Stop(_ context.Context) error {
+	return nil
+}
+
 func (h *Host) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	h.mu.Lock()
 	h.cancel = cancel
 	h.mu.Unlock()
+
+	h.state.Store(int32(HostStarting))
 
 	for _, fn := range h.onStart {
 		fn()
 	}
 
+	startupCtx, startupCancel := context.WithTimeout(ctx, h.startupTimeout)
+	defer startupCancel()
+
+	for _, svc := range h.hostedServices {
+		if err := svc.Start(startupCtx); err != nil {
+			startupCancel()
+			h.shutdownHosted(ctx)
+			return fmt.Errorf("hosted service start failed: %w", err)
+		}
+	}
+
+	var wg sync.WaitGroup
 	errCh := make(chan error, len(h.services))
+
 	for _, svc := range h.services {
 		s := svc
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			if err := s.Execute(ctx); err != nil {
 				errCh <- err
 			}
 		}()
 	}
 
+	h.state.Store(int32(HostRunning))
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	var firstErr error
 	select {
 	case <-sigCh:
 	case <-ctx.Done():
 	case err := <-errCh:
-		cancel()
-		for _, fn := range h.onStop {
-			fn()
-		}
-		return err
+		firstErr = err
 	}
 
 	cancel()
+
+	h.state.Store(int32(HostStopping))
+
+	h.shutdownHosted(ctx)
+
+	stopped := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(stopped)
+	}()
+
+	timeout := h.ShutdownTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+
+	select {
+	case <-stopped:
+	case <-time.After(timeout):
+	}
+
 	for _, fn := range h.onStop {
 		fn()
+	}
+
+	h.state.Store(int32(HostStopped))
+
+	if firstErr != nil {
+		return firstErr
 	}
 	return nil
 }
 
-// Shutdown triggers a graceful shutdown by cancelling the host context.
-func (h *Host) Shutdown(ctx context.Context) error {
+func (h *Host) shutdownHosted(_ context.Context) {
+	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for i := len(h.hostedServices) - 1; i >= 0; i-- {
+		h.hostedServices[i].Stop(stopCtx)
+	}
+}
+
+func (h *Host) Shutdown(_ context.Context) error {
 	h.mu.Lock()
 	cancel := h.cancel
 	h.mu.Unlock()
@@ -99,33 +198,43 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// OnStart registers a lifecycle callback invoked before services start.
+func (h *Host) State() HostState {
+	return HostState(h.state.Load())
+}
+
 func (h *Host) OnStart(fn func()) {
 	h.onStart = append(h.onStart, fn)
 }
 
-// OnStop registers a lifecycle callback invoked after services stop.
 func (h *Host) OnStop(fn func()) {
 	h.onStop = append(h.onStop, fn)
 }
 
+func (h *Host) AddHostedService(svc HostedService) {
+	h.hostedServices = append(h.hostedServices, svc)
+}
+
 // HostBuilder provides a fluent API for constructing a Host.
 type HostBuilder struct {
-	services []BackgroundService
-	onStart  []func()
-	onStop   []func()
-	di       *di.Builder
-	web      *srv.Server
-	webAddr  string
+	services        []BackgroundService
+	hostedServices  []HostedService
+	onStart         []func()
+	onStop          []func()
+	di              *di.Builder
+	web            *srv.Server
+	webAddr        string
+	shutdownTimeout time.Duration
+	startupTimeout  time.Duration
+	healthRegistry *health.Registry
 }
 
 // NewBuilder creates a new HostBuilder.
 func NewBuilder() *HostBuilder {
-	return &HostBuilder{}
+	return &HostBuilder{
+		startupTimeout: 15 * time.Second,
+	}
 }
 
-// ConfigureServices registers typed services in a DI Builder. The container
-// is built automatically and attached to the Host after Build().
 func (b *HostBuilder) ConfigureServices(fn func(*di.Builder)) *HostBuilder {
 	if b.di == nil {
 		b.di = di.NewBuilder()
@@ -134,8 +243,6 @@ func (b *HostBuilder) ConfigureServices(fn func(*di.Builder)) *HostBuilder {
 	return b
 }
 
-// ConfigureWeb registers routes and middleware on the default srv.Server.
-// The server is started automatically as a BackgroundService when Run() is called.
 func (b *HostBuilder) ConfigureWeb(fn func(*srv.Server)) *HostBuilder {
 	if b.web == nil {
 		b.web = srv.New()
@@ -144,41 +251,63 @@ func (b *HostBuilder) ConfigureWeb(fn func(*srv.Server)) *HostBuilder {
 	return b
 }
 
-// AddService registers a background service.
 func (b *HostBuilder) AddService(svc BackgroundService) *HostBuilder {
 	b.services = append(b.services, svc)
 	return b
 }
 
-// OnStart registers a lifecycle callback that runs before services start.
+func (b *HostBuilder) AddHostedService(svc HostedService) *HostBuilder {
+	b.hostedServices = append(b.hostedServices, svc)
+	return b
+}
+
 func (b *HostBuilder) OnStart(fn func()) *HostBuilder {
 	b.onStart = append(b.onStart, fn)
 	return b
 }
 
-// OnStop registers a lifecycle callback that runs after services stop.
 func (b *HostBuilder) OnStop(fn func()) *HostBuilder {
 	b.onStop = append(b.onStop, fn)
 	return b
 }
 
-// WithAddr sets the listen address for the auto-started web server
-// (default: ":8080").
 func (b *HostBuilder) WithAddr(addr string) *HostBuilder {
 	b.webAddr = addr
 	return b
 }
 
-// Build constructs a Host from the builder configuration.
+func (b *HostBuilder) WithShutdownTimeout(d time.Duration) *HostBuilder {
+	b.shutdownTimeout = d
+	return b
+}
+
+func (b *HostBuilder) WithStartupTimeout(d time.Duration) *HostBuilder {
+	b.startupTimeout = d
+	return b
+}
+
+func (b *HostBuilder) WithHealthRegistry(r *health.Registry) *HostBuilder {
+	b.healthRegistry = r
+	return b
+}
+
 func (b *HostBuilder) Build() *Host {
 	h := &Host{
-		services: append([]BackgroundService{}, b.services...),
-		onStart:  b.onStart,
-		onStop:   b.onStop,
+		services:        append([]BackgroundService{}, b.services...),
+		hostedServices:  append([]HostedService{}, b.hostedServices...),
+		onStart:         b.onStart,
+		onStop:          b.onStop,
+		ShutdownTimeout: b.shutdownTimeout,
+		startupTimeout:  b.startupTimeout,
+		HealthRegistry:  b.healthRegistry,
 	}
 
 	if b.di != nil {
-		h.Container = b.di.Build()
+		c, err := b.di.Build()
+		if err != nil {
+			panic(err)
+		}
+		h.Container = c
 	}
 	if b.web != nil {
 		addr := b.webAddr
@@ -188,6 +317,33 @@ func (b *HostBuilder) Build() *Host {
 		s := &webService{server: b.web, container: h.Container, addr: addr}
 		h.services = append(h.services, s)
 		h.Server = b.web
+	}
+
+	if h.HealthRegistry != nil && h.Server != nil {
+		h.Server.MapGet("/health/live", func(ctx *srv.Context) error {
+			return ctx.JSON(200, map[string]string{"status": "alive"})
+		})
+		h.Server.MapGet("/health/ready", func(ctx *srv.Context) error {
+			results := h.HealthRegistry.CheckAll(ctx.Request.Context())
+			healthy := true
+			details := make(map[string]string, len(results))
+			for name, report := range results {
+				details[name] = report.Status.String()
+				if report.Status == health.StatusUnhealthy {
+					healthy = false
+				}
+			}
+			code := 200
+			status := "ready"
+			if !healthy {
+				code = 503
+				status = "not ready"
+			}
+			return ctx.JSON(code, map[string]any{
+				"status":  status,
+				"details": details,
+			})
+		})
 	}
 
 	return h

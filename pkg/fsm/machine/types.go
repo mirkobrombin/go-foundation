@@ -6,9 +6,13 @@ import "time"
 type EventType int
 
 const (
+	// BeforeTransition fires before a state transition occurs.
 	BeforeTransition EventType = iota
+	// AfterTransition fires after a state transition completes.
 	AfterTransition
+	// EnterState fires when a state is entered.
 	EnterState
+	// ExitState fires when a state is exited.
 	ExitState
 )
 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,19 +23,21 @@ type stateHooks struct {
 
 // Machine manages an object's state machine with transitions and hooks.
 type Machine struct {
-	obj           any
-	val           reflect.Value
-	stateField    reflect.Value
-	stateType     reflect.StructField
-	transitions   map[string][]string
-	wildcards     []string
-	initialState  string
-	hooks         map[string]stateHooks
-	mu            sync.RWMutex
-	history       []TransitionRecord
-	listeners     []Listener
-	timeouts      map[string]parser.TimeoutRule
-	lastStateTime time.Time
+	obj              any
+	val              reflect.Value
+	stateField       reflect.Value
+	stateType        reflect.StructField
+	transitions      map[string][]string
+	transitionSet    map[string]map[string]bool
+	wildcards        []string
+	wildcardSet      map[string]bool
+	initialState     string
+	hooks            map[string]stateHooks
+	mu               sync.Mutex
+	history          []TransitionRecord
+	listeners        []Listener
+	timeouts         map[string]parser.TimeoutRule
+	lastStateTime    time.Time
 }
 
 // New creates a Machine from a struct pointer with an "fsm" tag field.
@@ -48,7 +49,6 @@ func New(obj any) (*Machine, error) {
 
 	elem := val.Elem()
 
-	// Optimization: Use cached tags parser
 	fields := tags.NewParser("fsm").ParseStruct(obj)
 
 	for _, meta := range fields {
@@ -62,7 +62,7 @@ func New(obj any) (*Machine, error) {
 		}
 
 		m := &Machine{
-			obj:          obj,
+			obj:           obj,
 			val:          elem,
 			stateField:   elem.Field(meta.Index),
 			stateType:    elem.Type().Field(meta.Index),
@@ -73,6 +73,18 @@ func New(obj any) (*Machine, error) {
 			hooks:        make(map[string]stateHooks),
 			history:      make([]TransitionRecord, 0),
 			listeners:    make([]Listener, 0),
+		}
+		m.transitionSet = make(map[string]map[string]bool, len(cfg.Transitions))
+		for src, dsts := range cfg.Transitions {
+			s := make(map[string]bool, len(dsts))
+			for _, d := range dsts {
+				s[d] = true
+			}
+			m.transitionSet[src] = s
+		}
+		m.wildcardSet = make(map[string]bool, len(cfg.Wildcards))
+		for _, w := range cfg.Wildcards {
+			m.wildcardSet[w] = true
 		}
 
 		m.initHooks()
@@ -133,15 +145,15 @@ func (m *Machine) initHooks() {
 
 // CurrentState returns the current state value.
 func (m *Machine) CurrentState() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.stateField.String()
 }
 
 // History returns a copy of all transition records.
 func (m *Machine) History() []TransitionRecord {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return append([]TransitionRecord(nil), m.history...)
 }
 
@@ -160,10 +172,10 @@ func (m *Machine) emitEvent(eventType EventType, from, to string) {
 		Timestamp: time.Now(),
 		Machine:   m,
 	}
-	m.mu.RLock()
+	m.mu.Lock()
 	listeners := make([]Listener, len(m.listeners))
 	copy(listeners, m.listeners)
-	m.mu.RUnlock()
+	m.mu.Unlock()
 	for _, l := range listeners {
 		l(evt)
 	}
@@ -171,19 +183,19 @@ func (m *Machine) emitEvent(eventType EventType, from, to string) {
 
 // CanTransition checks whether a transition to target is allowed.
 func (m *Machine) CanTransition(target string) error {
-	m.mu.RLock()
-	current := m.stateField.String()
-	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	allowed := slices.Contains(m.wildcards, target)
+	current := m.stateField.String()
+	return m.checkTransitionLocked(current, target)
+}
+
+func (m *Machine) checkTransitionLocked(current, target string) error {
+	allowed := m.wildcardSet[target]
 	if !allowed {
-		m.mu.RLock()
-		if dests, ok := m.transitions[current]; ok {
-			if slices.Contains(dests, target) {
-				allowed = true
-			}
+		if dests, ok := m.transitionSet[current]; ok {
+			allowed = dests[target]
 		}
-		m.mu.RUnlock()
 	}
 
 	if !allowed {
@@ -205,24 +217,16 @@ func (m *Machine) Transition(target string) error {
 }
 
 func (m *Machine) transitionInternal(target string, trigger string) error {
-	if err := m.CanTransition(target); err != nil {
+	m.mu.Lock()
+	current := m.stateField.String()
+	if err := m.checkTransitionLocked(current, target); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
-	m.mu.Lock()
-	current := m.stateField.String()
-	m.mu.Unlock()
+	exitHook := m.hooks[current].exit
+	enterHook := m.hooks[target].enter
 
-	m.emitEvent(BeforeTransition, current, target)
-
-	if current != "" {
-		if h, ok := m.hooks[current]; ok && h.exit != nil {
-			h.exit()
-		}
-		m.emitEvent(ExitState, current, target)
-	}
-
-	m.mu.Lock()
 	m.stateField.SetString(target)
 	m.lastStateTime = time.Now()
 	m.history = append(m.history, TransitionRecord{
@@ -233,8 +237,17 @@ func (m *Machine) transitionInternal(target string, trigger string) error {
 	})
 	m.mu.Unlock()
 
-	if h, ok := m.hooks[target]; ok && h.enter != nil {
-		h.enter()
+	m.emitEvent(BeforeTransition, current, target)
+
+	if current != "" {
+		if exitHook != nil {
+			exitHook()
+		}
+		m.emitEvent(ExitState, current, target)
+	}
+
+	if enterHook != nil {
+		enterHook()
 	}
 	m.emitEvent(EnterState, current, target)
 	m.emitEvent(AfterTransition, current, target)
@@ -244,11 +257,11 @@ func (m *Machine) transitionInternal(target string, trigger string) error {
 
 // CheckTimeouts transitions on timeout if a rule has expired.
 func (m *Machine) CheckTimeouts() error {
-	m.mu.RLock()
+	m.mu.Lock()
 	current := m.stateField.String()
 	elapsed := time.Since(m.lastStateTime)
 	rule, exists := m.timeouts[current]
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	if exists && elapsed > rule.Duration {
 		return m.transitionInternal(rule.ToState, "timeout")
