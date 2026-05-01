@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="https://github.com/mirkobrombin/go-foundation/blob/main/logo.png?raw=true" height="128"/>
   <h1>go-foundation</h1>
   <p>The standard library's missing standard library.</p>
   <p>
@@ -108,3 +109,7 @@ defer errutil.Auto() // put this once at the top of main()
 ## License
 
 MIT
+
+## Logo
+
+Created following the [gopher style](https://go.dev/blog/gopher) using AI (because I am not an illustration at this level).
