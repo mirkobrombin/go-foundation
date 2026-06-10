@@ -23,21 +23,21 @@ type stateHooks struct {
 
 // Machine manages an object's state machine with transitions and hooks.
 type Machine struct {
-	obj              any
-	val              reflect.Value
-	stateField       reflect.Value
-	stateType        reflect.StructField
-	transitions      map[string][]string
-	transitionSet    map[string]map[string]bool
-	wildcards        []string
-	wildcardSet      map[string]bool
-	initialState     string
-	hooks            map[string]stateHooks
-	mu               sync.Mutex
-	history          []TransitionRecord
-	listeners        []Listener
-	timeouts         map[string]parser.TimeoutRule
-	lastStateTime    time.Time
+	obj           any
+	val           reflect.Value
+	stateField    reflect.Value
+	stateType     reflect.StructField
+	transitions   map[string][]string
+	transitionSet map[string]map[string]bool
+	wildcards     []string
+	wildcardSet   map[string]bool
+	initialState  string
+	hooks         map[string]stateHooks
+	mu            sync.Mutex
+	history       []TransitionRecord
+	listeners     []Listener
+	timeouts      map[string]parser.TimeoutRule
+	lastStateTime time.Time
 }
 
 // New creates a Machine from a struct pointer with an "fsm" tag field.
@@ -61,11 +61,21 @@ func New(obj any) (*Machine, error) {
 			return nil, err
 		}
 
+		// Resolve the tagged field by name. meta.Index is a counter over the
+		// tagged fields, not the struct field index, so using it directly only
+		// works when the tagged field is the first field of the struct. Looking
+		// the field up by name binds the machine to the correct field
+		// regardless of how many untagged fields precede it.
+		sf, ok := elem.Type().FieldByName(meta.Name)
+		if !ok {
+			return nil, fmt.Errorf("field '%s' not found on %T", meta.Name, obj)
+		}
+
 		m := &Machine{
-			obj:           obj,
+			obj:          obj,
 			val:          elem,
-			stateField:   elem.Field(meta.Index),
-			stateType:    elem.Type().Field(meta.Index),
+			stateField:   elem.FieldByIndex(sf.Index),
+			stateType:    sf,
 			transitions:  cfg.Transitions,
 			wildcards:    cfg.Wildcards,
 			initialState: cfg.InitialState,

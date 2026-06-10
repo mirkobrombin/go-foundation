@@ -28,8 +28,8 @@ func (g *guardFSM) CanPaid() error {
 }
 
 type hookFSM struct {
-	State        string `fsm:"initial:idle; idle->active; active->done"`
-	onExitIdle   bool
+	State         string `fsm:"initial:idle; idle->active; active->done"`
+	onExitIdle    bool
 	onEnterActive bool
 	onExitActive  bool
 	onEnterDone   bool
@@ -362,5 +362,55 @@ func TestDoubleWildcard(t *testing.T) {
 	}
 	if err := m.Transition("cancelled"); err != nil {
 		t.Fatalf("Transition to cancelled failed: %v", err)
+	}
+}
+
+// TestStateFieldNotFirst guards a regression where the machine bound to the
+// wrong field when the fsm-tagged field was not the first field of the struct.
+// New must locate the State field by name, not by a tagged-field counter.
+func TestStateFieldNotFirst(t *testing.T) {
+	type order struct {
+		ID       [16]byte // untagged fields before the state field
+		Customer string
+		Amount   int
+		State    string `fsm:"initial:draft; draft->confirmed; confirmed->paid; *->cancelled"`
+	}
+	o := &order{ID: [16]byte{1, 2, 3}, Customer: "acme", Amount: 42}
+	m, err := New(o)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if got := m.CurrentState(); got != "draft" {
+		t.Fatalf("CurrentState = %q, want draft (machine bound to the wrong field?)", got)
+	}
+	if err := m.Transition("confirmed"); err != nil {
+		t.Fatalf("Transition(confirmed): %v", err)
+	}
+	if o.State != "confirmed" {
+		t.Errorf("State field = %q, want confirmed", o.State)
+	}
+	// The untagged fields must be untouched.
+	if o.Customer != "acme" || o.Amount != 42 {
+		t.Errorf("untagged fields mutated: %+v", o)
+	}
+}
+
+// TestStatePreservedWhenNotFirst confirms a non-empty pre-set state is honored
+// (not reset to initial) when the state field is not first.
+func TestStatePreservedWhenNotFirst(t *testing.T) {
+	type job struct {
+		Name  string
+		State string `fsm:"initial:created; created->running; running->done; *->failed"`
+	}
+	j := &job{Name: "x", State: "running"}
+	m, err := New(j)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if got := m.CurrentState(); got != "running" {
+		t.Fatalf("CurrentState = %q, want running (preset state lost)", got)
+	}
+	if err := m.Transition("done"); err != nil {
+		t.Fatalf("Transition(done): %v", err)
 	}
 }
