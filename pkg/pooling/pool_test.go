@@ -7,7 +7,7 @@ func TestPoolReusesReturnedItem(t *testing.T) {
 	p := New(func() int {
 		next++
 		return next
-	})
+	}, WithMaxSize[int](1))
 
 	item := p.Get()
 	p.Put(item)
@@ -38,7 +38,7 @@ func TestPoolMaxSizeLimitsRetainedItems(t *testing.T) {
 func TestPoolFinalizerRunsBeforeRetain(t *testing.T) {
 	p := New(func() []int { return []int{1, 2} }, WithFinalizer(func(v []int) {
 		v[0] = 9
-	}))
+	}), WithMaxSize[[]int](1))
 
 	item := p.Get()
 	p.Put(item)
