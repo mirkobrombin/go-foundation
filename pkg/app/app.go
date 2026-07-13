@@ -113,6 +113,10 @@ func (a *App) Listen(addr string) error {
 		addr = ":8080"
 	}
 
+	if err := a.runDoctor(); err != nil {
+		return err
+	}
+
 	h := hosting.NewBuilder().
 		WithAddr(addr).
 		AddHostedService(&schedulerHost{sched: a.sched}).

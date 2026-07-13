@@ -94,6 +94,29 @@ func TestServer_Group(t *testing.T) {
 	}
 }
 
+func TestServer_Routes(t *testing.T) {
+	s := New()
+	s.MapGet("/hello", func(ctx *Context) error {
+		ctx.String(200, "ok")
+		return nil
+	})
+	s.MapPost("/data", func(ctx *Context) error {
+		ctx.String(201, "ok")
+		return nil
+	})
+
+	routes := s.Routes()
+	if len(routes) != 2 {
+		t.Fatalf("routes = %d, want 2", len(routes))
+	}
+	if routes[0].Method != "GET" || routes[0].Path != "/hello" {
+		t.Errorf("route[0] = %s %s, want GET /hello", routes[0].Method, routes[0].Path)
+	}
+	if routes[1].Method != "POST" || routes[1].Path != "/data" {
+		t.Errorf("route[1] = %s %s, want POST /data", routes[1].Method, routes[1].Path)
+	}
+}
+
 func TestServer_CORS(t *testing.T) {
 	s := New()
 	s.Use(CORS("*"))

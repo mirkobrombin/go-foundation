@@ -126,6 +126,12 @@ type route struct {
 	handler HandlerFunc
 }
 
+// RouteInfo describes a registered route.
+type RouteInfo struct {
+	Method string
+	Path   string
+}
+
 // Server is a minimal API HTTP server with routing and middleware support.
 type Server struct {
 	middleware []Middleware
@@ -220,6 +226,18 @@ func (s *Server) addRoute(method, path string, handler HandlerFunc, mw ...Middle
 	s.mu.Unlock()
 }
 
+// Routes returns the registered route metadata.
+func (s *Server) Routes() []RouteInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	routes := make([]RouteInfo, 0, len(s.routes))
+	for _, route := range s.routes {
+		routes = append(routes, RouteInfo{Method: route.method, Path: route.path})
+	}
+	return routes
+}
+
 func chainMiddleware(h HandlerFunc, mw ...Middleware) HandlerFunc {
 	for i := len(mw) - 1; i >= 0; i-- {
 		h = mw[i](h)
@@ -290,18 +308,28 @@ func matchRoute(pattern, path string) (map[string]string, bool) {
 
 // ListenAndServe starts the server on the given address.
 func (s *Server) ListenAndServe(addr string) error {
+	if err := s.runDoctor(); err != nil {
+		return err
+	}
+
+	server := &http.Server{Addr: addr, Handler: s}
 	s.mu.Lock()
-	s.server = &http.Server{Addr: addr, Handler: s}
+	s.server = server
 	s.mu.Unlock()
-	return s.server.ListenAndServe()
+	return server.ListenAndServe()
 }
 
 // ListenAndServeTLS starts the server with TLS on the given address.
 func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
+	if err := s.runDoctor(); err != nil {
+		return err
+	}
+
+	server := &http.Server{Addr: addr, Handler: s}
 	s.mu.Lock()
-	s.server = &http.Server{Addr: addr, Handler: s}
+	s.server = server
 	s.mu.Unlock()
-	return s.server.ListenAndServeTLS(certFile, keyFile)
+	return server.ListenAndServeTLS(certFile, keyFile)
 }
 
 //Shutdown gracefully shuts down the server.

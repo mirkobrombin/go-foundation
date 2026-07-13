@@ -26,6 +26,8 @@ internal/testing/host.go
 
 `internal/testing` wraps `testutil.NewTestHost` with project defaults.
 
+Use [Foundation Doctor](foundation-doctor.md) in project templates so startup checks stay available without adding code to every service.
+
 ## Startup
 
 ```go

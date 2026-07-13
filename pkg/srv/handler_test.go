@@ -48,6 +48,22 @@ func TestRegisterHandler_Basic(t *testing.T) {
 	}
 }
 
+func TestRegisterHandler_Routes(t *testing.T) {
+	s := New()
+	b := di.NewBuilder()
+	container, _ := b.Build()
+
+	s.RegisterHandler(&PingEndpoint{}, container)
+
+	routes := s.Routes()
+	if len(routes) != 1 {
+		t.Fatalf("routes = %d, want 1", len(routes))
+	}
+	if routes[0].Method != "GET" || routes[0].Path != "/ping" {
+		t.Errorf("route = %s %s, want GET /ping", routes[0].Method, routes[0].Path)
+	}
+}
+
 func TestRegisterHandler_WithQuery(t *testing.T) {
 	s := New()
 	b := di.NewBuilder()

@@ -13,6 +13,8 @@
   </p>
   <p>
     <a href="docs/foundation-project.md">Foundation project shape</a>
+    |
+    <a href="docs/foundation-doctor.md">Foundation Doctor</a>
   </p>
 </div>
 
@@ -64,6 +66,18 @@
 | `align` | Power-of-2 alignment |
 | `contracts` | Zero-cost interface contract markers |
 | `pointer` | Field offset registry |
+| `doctor` | Build-tag startup checks for foundation services |
+
+## Foundation Doctor
+
+Compile a service with `run_foundation_doctor` to run startup checks before the HTTP host starts.
+
+```sh
+go build -tags run_foundation_doctor -o api ./cmd/api
+FOUNDATION_DOCTOR=fail ./api
+```
+
+See [Foundation Doctor](docs/foundation-doctor.md) for modes and checks.
 
 ## Panicking, but with style
 

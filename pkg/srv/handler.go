@@ -50,7 +50,10 @@ func (s *Server) RegisterHandler(prototype Handler, container *di.Container) {
 	meta.path = path
 
 	handler := s.buildHandler(meta)
+	s.mu.Lock()
+	s.routes = append(s.routes, route{method: method, path: path, handler: handler})
 	s.tree.insert(method, path, handler)
+	s.mu.Unlock()
 }
 
 type handlerMeta struct {
