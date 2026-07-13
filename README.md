@@ -11,6 +11,9 @@
   <p>
     <a href="https://go-foundation.bromb.in"><strong>Read the Documentation</strong></a>
   </p>
+  <p>
+    <a href="docs/foundation-project.md">Foundation project shape</a>
+  </p>
 </div>
 
 ---
@@ -27,13 +30,13 @@
 | `scheduler` | Cron-based background jobs, fire-and-forget, delayed |
 | `caching` | `Cache[T]` + `DistributedCache` interface + `DistributedBridge[T]` |
 | `serializer` | JSON serialization policy (SnakeCase, CamelCase, custom types) |
-| `telemetry` | Unified Tracer/Span/Meter/Counter/Histogram/Gauge (OTel-ready) |
+| `telemetry` | Metrics and trace provider interfaces, simple meters, exporters |
 | `testutil` | `TestHost` (DI + HTTP test server), `FakeLogger`, `TestResponse` |
 | `validation` | Struct tag validation (required, email, min/max) |
 | `pipeline` | Generic middleware pipeline |
 | `health` | Health check registry |
 | `events` | Type-safe event bus (middleware, wildcard, async) |
-| `tracing` | `Tracer`/`Span` interface + noop |
+| `tracing` | Small `Tracer`/`Span` abstraction for code that only needs spans |
 | `pooling` | Generic `Pool[T]` with finalizer |
 | `errutil` | `Auto()`, `Wrap()`, `WError`, `Print()`, `Recover()`, `JoinErrors()` |
 | `auth` | Token signing with key rotation (HMAC, RSA, ECDSA, EdDSA) |
@@ -112,4 +115,4 @@ MIT
 
 ## Logo
 
-Created following the [gopher style](https://go.dev/blog/gopher) using AI (because I am not an illustration at this level).
+Created following the [gopher style](https://go.dev/blog/gopher).
