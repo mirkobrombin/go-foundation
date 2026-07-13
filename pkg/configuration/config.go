@@ -148,7 +148,8 @@ func (c *Configuration) Bind(target any) error {
 	defer c.mu.RUnlock()
 
 	elem := val.Elem()
-	confParser := tags.NewParser("conf", tags.WithPairDelimiter(","))
+	typ := elem.Type()
+	confParser := tags.NewParser("conf", tags.WithPairDelimiter(","), tags.WithIncludeUntagged())
 	fields := confParser.ParseStruct(target)
 
 	for _, meta := range fields {
@@ -180,7 +181,10 @@ func (c *Configuration) Bind(target any) error {
 		}
 
 		if !found {
-			if def := meta.Get("default"); def != "" {
+			if def := typ.Field(meta.Index).Tag.Get("default"); def != "" {
+				rawVal = def
+				found = true
+			} else if def := meta.Get("default"); def != "" {
 				rawVal = def
 				found = true
 			}
