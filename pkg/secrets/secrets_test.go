@@ -1,7 +1,11 @@
 package secrets_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -75,9 +79,140 @@ func TestEnvStoreReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestVaultStoreReturnsNotImplemented(t *testing.T) {
+func TestVaultStoreRequiresConfig(t *testing.T) {
 	store := secrets.NewVaultStore()
-	if err := store.Set("k", []byte("v")); !errors.Is(err, secrets.ErrNotImplemented) {
-		t.Fatalf("Set() error = %v, want ErrNotImplemented", err)
+	if err := store.Set("k", []byte("v")); !errors.Is(err, secrets.ErrNotConfigured) {
+		t.Fatalf("Set() error = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestVaultStoreRoundTrip(t *testing.T) {
+	values := make(map[string]string)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Vault-Token") != "token" {
+			http.Error(w, "bad token", http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/v1/secret/data/app/db" {
+			http.Error(w, "bad path", http.StatusNotFound)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodPut:
+			var in struct {
+				Data map[string]string `json:"data"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				http.Error(w, "bad body", http.StatusBadRequest)
+				return
+			}
+			values["app/db"] = in.Data["value"]
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"data": map[string]string{"value": values["app/db"]},
+				},
+			})
+		case http.MethodDelete:
+			delete(values, "app/db")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "bad method", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	store := secrets.NewVaultStore(
+		secrets.WithVaultAddress(server.URL),
+		secrets.WithVaultToken("token"),
+	)
+
+	if err := store.Set("app/db", []byte("password")); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	if values["app/db"] != base64.StdEncoding.EncodeToString([]byte("password")) {
+		t.Fatalf("stored value = %q", values["app/db"])
+	}
+
+	got, err := store.Get("app/db")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if string(got) != "password" {
+		t.Fatalf("Get() = %q, want password", string(got))
+	}
+
+	if err := store.Delete("app/db"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, ok := values["app/db"]; ok {
+		t.Fatal("Delete() did not remove value")
+	}
+}
+
+func TestVaultStoreGetMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	store := secrets.NewVaultStore(
+		secrets.WithVaultAddress(server.URL),
+		secrets.WithVaultToken("token"),
+	)
+
+	_, err := store.Get("missing")
+	if !errors.Is(err, secrets.ErrNotFound) {
+		t.Fatalf("Get() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestVaultStoreRejectsInvalidKeys(t *testing.T) {
+	store := secrets.NewVaultStore(
+		secrets.WithVaultAddress("https://vault.example.com"),
+		secrets.WithVaultToken("token"),
+	)
+
+	tests := []string{"", ".", "..", "app/../db", "app//db"}
+	for _, key := range tests {
+		t.Run(key, func(t *testing.T) {
+			if err := store.Set(key, []byte("value")); !errors.Is(err, secrets.ErrInvalidKey) {
+				t.Fatalf("Set() error = %v, want ErrInvalidKey", err)
+			}
+		})
+	}
+}
+
+func TestVaultStoreRejectsPlainHTTPRemoteAddress(t *testing.T) {
+	store := secrets.NewVaultStore(
+		secrets.WithVaultAddress("http://vault.example.com"),
+		secrets.WithVaultToken("token"),
+	)
+
+	if err := store.Set("key", []byte("value")); !errors.Is(err, secrets.ErrInsecureVaultAddress) {
+		t.Fatalf("Set() error = %v, want ErrInsecureVaultAddress", err)
+	}
+}
+
+func TestVaultStoreDoesNotFollowRedirects(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+
+	store := secrets.NewVaultStore(
+		secrets.WithVaultAddress(server.URL),
+		secrets.WithVaultToken("token"),
+	)
+
+	if err := store.Set("key", []byte("value")); err == nil {
+		t.Fatal("Set() error = nil, want redirect status error")
+	}
+	if hits != 1 {
+		t.Fatalf("redirect hits = %d, want 1", hits)
 	}
 }
