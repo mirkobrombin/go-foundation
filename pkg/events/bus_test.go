@@ -92,6 +92,48 @@ func TestBus_EmitAsync(t *testing.T) {
 	}
 }
 
+func TestBus_EmitAny(t *testing.T) {
+	b := New()
+	defer b.Close()
+
+	var received *MyEvent
+	Subscribe(b, func(ctx context.Context, e *MyEvent) error {
+		received = e
+		return nil
+	})
+
+	err := EmitAny(context.Background(), b, &MyEvent{ID: 9})
+	if err != nil {
+		t.Fatalf("EmitAny: %v", err)
+	}
+	if received == nil || received.ID != 9 {
+		t.Fatalf("received = %#v", received)
+	}
+}
+
+func TestBus_EmitAnyWithMiddlewareAndWildcard(t *testing.T) {
+	b := New()
+	defer b.Close()
+
+	b.Use(func(ctx context.Context, event any, next func(context.Context, any) error) error {
+		return next(ctx, event)
+	})
+
+	called := false
+	SubscribeWildcard(b, func(ctx context.Context, event any) error {
+		called = true
+		return nil
+	})
+
+	err := EmitAny(context.Background(), b, &MyEvent{ID: 10})
+	if err != nil {
+		t.Fatalf("EmitAny: %v", err)
+	}
+	if !called {
+		t.Fatal("wildcard handler was not called")
+	}
+}
+
 func TestBus_Middleware(t *testing.T) {
 	b := New()
 	defer b.Close()

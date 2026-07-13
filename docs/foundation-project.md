@@ -96,6 +96,7 @@ Use these first:
 - `di`: service wiring.
 - `configuration`: typed config.
 - `bind`, `validation`: request input.
+- `actions`: CLI, TUI, desktop, and editor commands.
 - `scheduler`: background jobs.
 - `health`: readiness checks.
 - `testutil`: HTTP and DI tests.

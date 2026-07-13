@@ -20,11 +20,11 @@ type Priority int
 
 const (
 	// PriorityHigh runs the handler before normal and low priority.
-	PriorityHigh   Priority = 100
+	PriorityHigh Priority = 100
 	// PriorityNormal is the default priority.
 	PriorityNormal Priority = 0
 	// PriorityLow runs the handler after all others.
-	PriorityLow    Priority = -100
+	PriorityLow Priority = -100
 )
 
 // DispatchStrategy controls error handling during event dispatch.
@@ -59,17 +59,17 @@ const (
 
 // Bus is the event bus that dispatches events to registered handlers.
 type Bus struct {
-	subscribers    *safemap.Map[reflect.Type, []subscriber]
-	strategy       DispatchStrategy
-	middlewares    []Middleware
-	onAsyncError   func(error)
-	wildcard       []subscriber
-	mu             sync.RWMutex
+	subscribers  *safemap.Map[reflect.Type, []subscriber]
+	strategy     DispatchStrategy
+	middlewares  []Middleware
+	onAsyncError func(error)
+	wildcard     []subscriber
+	mu           sync.RWMutex
 
-	asyncCh        chan asyncEvent
-	asyncClose     chan struct{}
-	overflowStrat  OverflowStrategy
-	bufferSize     int
+	asyncCh       chan asyncEvent
+	asyncClose    chan struct{}
+	overflowStrat OverflowStrategy
+	bufferSize    int
 }
 
 type subscriber struct {
@@ -222,13 +222,86 @@ func Emit[T any](ctx context.Context, b *Bus, event T) error {
 
 	if len(mws) > 0 {
 		chain := applyMiddleware(emit, mws)
-		return chain(ctx, event)
+		if err := chain(ctx, event); err != nil {
+			return err
+		}
+		return emitWildcards(ctx, b, event)
 	}
 
 	if err := emit(ctx, event); err != nil {
 		return err
 	}
 
+	b.mu.RLock()
+	wildcards := b.wildcard
+	b.mu.RUnlock()
+	for _, w := range wildcards {
+		if fn, ok := w.handler.(func(ctx context.Context, event any) error); ok {
+			if err := fn(ctx, event); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// EmitAny dispatches an event using its runtime type.
+func EmitAny(ctx context.Context, b *Bus, event any) error {
+	if b == nil {
+		b = defaultBus
+	}
+	if event == nil {
+		return nil
+	}
+	return emitByType(ctx, b, reflect.TypeOf(event), event)
+}
+
+func emitByType(ctx context.Context, b *Bus, key reflect.Type, event any) error {
+	subs, ok := b.subscribers.Get(key)
+
+	b.mu.RLock()
+	mws := b.middlewares
+	b.mu.RUnlock()
+
+	emit := func(ctx context.Context, evt any) error {
+		if !ok {
+			return nil
+		}
+		var errs []error
+		for _, sub := range subs {
+			fn := reflect.ValueOf(sub.handler)
+			results := fn.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(evt)})
+			if len(results) == 1 && !results[0].IsNil() {
+				err := results[0].Interface().(error)
+				if b.strategy == StopOnFirstError {
+					return err
+				}
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			return errors.Join(errs...)
+		}
+		return nil
+	}
+
+	if len(mws) > 0 {
+		chain := applyMiddleware(emit, mws)
+		if err := chain(ctx, event); err != nil {
+			return err
+		}
+		return emitWildcards(ctx, b, event)
+	}
+
+	if err := emit(ctx, event); err != nil {
+		return err
+	}
+
+	return emitWildcards(ctx, b, event)
+}
+
+func emitWildcards(ctx context.Context, b *Bus, event any) error {
 	b.mu.RLock()
 	wildcards := b.wildcard
 	b.mu.RUnlock()
@@ -269,6 +342,49 @@ func EmitAsync[T any](ctx context.Context, b *Bus, event T) {
 		},
 	}
 
+	emitAsyncEvent(b, evt)
+}
+
+// EmitAnyAsync dispatches an event asynchronously using its runtime type.
+func EmitAnyAsync(ctx context.Context, b *Bus, event any) {
+	if b == nil {
+		b = defaultBus
+	}
+	if event == nil {
+		return
+	}
+	emitAsyncByType(ctx, b, reflect.TypeOf(event), event)
+}
+
+func emitAsyncByType(ctx context.Context, b *Bus, key reflect.Type, event any) {
+	evt := asyncEvent{
+		event: event,
+		emit: func(ctx context.Context, evt any) error {
+			subs, ok := b.subscribers.Get(key)
+			if !ok {
+				return nil
+			}
+			for _, sub := range subs {
+				fn := reflect.ValueOf(sub.handler)
+				results := fn.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(evt)})
+				if len(results) == 1 && !results[0].IsNil() {
+					err := results[0].Interface().(error)
+					if b.strategy == StopOnFirstError {
+						return err
+					}
+					if b.strategy == BestEffort {
+						continue
+					}
+				}
+			}
+			return nil
+		},
+	}
+
+	emitAsyncEvent(b, evt)
+}
+
+func emitAsyncEvent(b *Bus, evt asyncEvent) {
 	switch b.overflowStrat {
 	case OverflowBlock:
 		b.asyncCh <- evt

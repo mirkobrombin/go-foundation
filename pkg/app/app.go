@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/mirkobrombin/go-foundation/pkg/actions"
 	"github.com/mirkobrombin/go-foundation/pkg/di"
 	"github.com/mirkobrombin/go-foundation/pkg/dispatcher"
+	"github.com/mirkobrombin/go-foundation/pkg/events"
 	"github.com/mirkobrombin/go-foundation/pkg/hosting"
 	"github.com/mirkobrombin/go-foundation/pkg/scheduler"
 	"github.com/mirkobrombin/go-foundation/pkg/srv"
@@ -21,6 +23,7 @@ type Handler interface {
 type App struct {
 	container  *di.Container
 	server     *srv.Server
+	actions    *actions.Router
 	dispatch   *dispatcher.Dispatcher
 	sched      *scheduler.Scheduler
 	builder    *di.Builder
@@ -33,6 +36,7 @@ func New() *App {
 	return &App{
 		builder:  di.NewBuilder(),
 		server:   srv.New(),
+		actions:  actions.New(),
 		dispatch: dispatcher.New(),
 		sched:    scheduler.New(),
 		logger:   slog.Default(),
@@ -48,6 +52,7 @@ func (a *App) Log(logger *slog.Logger) *App {
 // Provide registers a named dependency for injection into handler structs.
 func (a *App) Provide(name string, instance any) *App {
 	a.builder.Provide(name, instance)
+	a.actions.Provide(name, instance)
 	return a
 }
 
@@ -63,9 +68,55 @@ func (a *App) RegisterAction(name string, handler func(ctx context.Context, payl
 	return a
 }
 
+// RegisterActionHandler registers a struct-tagged action handler.
+func (a *App) RegisterActionHandler(h actions.Handler) *App {
+	a.actions.Register(h)
+	return a
+}
+
 // Dispatch calls a named action handler.
 func (a *App) Dispatch(ctx context.Context, name string, payload ...any) (any, error) {
-	return a.dispatch.Dispatch(ctx, name, payload...)
+	if a.dispatch.Has(name) {
+		return a.dispatch.Dispatch(ctx, name, payload...)
+	}
+	if a.container == nil {
+		if _, err := a.Build(); err != nil {
+			return nil, fmt.Errorf("app: build failed: %w", err)
+		}
+	}
+	return a.actions.Dispatch(ctx, name, payload...)
+}
+
+// DispatchKey calls a struct-tagged action handler by key binding.
+func (a *App) DispatchKey(ctx context.Context, key string, payload ...any) (any, error) {
+	if a.container == nil {
+		if _, err := a.Build(); err != nil {
+			return nil, fmt.Errorf("app: build failed: %w", err)
+		}
+	}
+	return a.actions.DispatchKey(ctx, key, payload...)
+}
+
+// UseActionEvents emits action instances after dispatch.
+func (a *App) UseActionEvents(bus *events.Bus) *App {
+	a.actions.UseEvents(bus)
+	return a
+}
+
+// UseAsyncActionEvents emits action instances asynchronously after dispatch.
+func (a *App) UseAsyncActionEvents(bus *events.Bus) *App {
+	a.actions.UseAsyncEvents(bus)
+	return a
+}
+
+// Actions returns registered struct-tagged action names.
+func (a *App) Actions() []string {
+	return a.actions.Actions()
+}
+
+// KeyBindings returns struct-tagged action key bindings.
+func (a *App) KeyBindings() map[string]string {
+	return a.actions.KeyBindings()
 }
 
 // Schedule registers a cron job.
@@ -93,6 +144,7 @@ func (a *App) Build() (*di.Container, error) {
 		return nil, err
 	}
 	a.container = container
+	a.actions.UseContainer(container)
 
 	for _, h := range a.handlerReg {
 		a.server.RegisterHandler(h, container)

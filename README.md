@@ -15,6 +15,8 @@
     <a href="docs/foundation-project.md">Foundation project shape</a>
     |
     <a href="docs/foundation-doctor.md">Foundation Doctor</a>
+    |
+    <a href="docs/go-module-router-migration.md">go-module-router migration</a>
   </p>
 </div>
 
@@ -30,6 +32,7 @@
 | `configuration` | Multi-source config (env, file, flags) |
 | `options` | Functional options, `Options[T]`, merge, validation |
 | `scheduler` | Cron-based background jobs, fire-and-forget, delayed |
+| `actions` | Struct-tagged commands with key bindings and optional events |
 | `caching` | `Cache[T]` + `DistributedCache` interface + `DistributedBridge[T]` |
 | `serializer` | JSON serialization policy (SnakeCase, CamelCase, custom types) |
 | `telemetry` | Metrics and trace provider interfaces, simple meters, exporters |
