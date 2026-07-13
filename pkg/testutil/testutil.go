@@ -30,7 +30,6 @@ func NewTestHost(setup func(b *di.Builder, app *srv.Server)) *TestHost {
 	if err != nil {
 		panic(err)
 	}
-	_ = err
 	ts := httptest.NewServer(app)
 
 	return &TestHost{
@@ -46,6 +45,11 @@ func (h *TestHost) Close() {
 	for _, f := range h.cleanup {
 		f()
 	}
+}
+
+// Cleanup registers a function to run when the host closes.
+func (h *TestHost) Cleanup(fn func()) {
+	h.cleanup = append(h.cleanup, fn)
 }
 
 // URL returns the full URL for the given path.
@@ -75,7 +79,7 @@ func (h *TestHost) Post(path string, contentType string, body io.Reader) *TestRe
 		return &TestResponse{Error: err}
 	}
 	defer resp.Body.Close()
- responseBody, _ := io.ReadAll(resp.Body)
+	responseBody, _ := io.ReadAll(resp.Body)
 	return &TestResponse{
 		StatusCode: resp.StatusCode,
 		Body:       responseBody,
