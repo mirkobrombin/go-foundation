@@ -18,6 +18,7 @@ env:
   GOVULNCHECK_VERSION: "v1.6.0"
   EUPROVGUARD_VERSION: "v1.0.1"
   PALLAS_VERSION: "v2.0.3"
+  VSCE_VERSION: "3.9.2"
 
 jobs:
   build:
@@ -69,6 +70,17 @@ jobs:
         with:
           name: foundation-cli
           path: dist/
+          if-no-files-found: error
+
+      - name: Package VS Code extension
+        working-directory: editors/vscode
+        run: npx --yes @vscode/vsce@${{ env.VSCE_VERSION }} package
+
+      - name: Upload VS Code extension
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: vscode-extension
+          path: editors/vscode/*.vsix
           if-no-files-found: error
 
   test:

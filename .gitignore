@@ -11,5 +11,6 @@
 /report-*.html
 /report-*.txt
 
-# Editor integration dependencies
+# Editor integration dependencies and packages
 /editors/vscode/node_modules/
+/editors/vscode/*.vsix

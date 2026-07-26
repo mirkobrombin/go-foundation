@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "mirkobrombin",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mirkobrombin/go-foundation.git",
+    "directory": "editors/vscode"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
