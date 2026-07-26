@@ -1,0 +1,72 @@
+{
+  "name": "foundation-go",
+  "displayName": "Foundation for Go",
+  "description": "Static diagnostics, metadata, and navigation for Foundation v2 projects.",
+  "version": "0.1.0",
+  "publisher": "mirkobrombin",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:go",
+    "onCommand:foundation.checkWorkspace",
+    "onCommand:foundation.generate"
+  ],
+  "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Foundation runs a local development executable and is disabled in Restricted Mode."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "foundation.checkWorkspace",
+        "title": "Foundation: Check Workspace"
+      },
+      {
+        "command": "foundation.generate",
+        "title": "Foundation: Generate Static Registries"
+      },
+      {
+        "command": "foundation.showMetadata",
+        "title": "Foundation: Show Metadata"
+      }
+    ],
+    "configuration": {
+      "title": "Foundation",
+      "properties": {
+        "foundation.executable": {
+          "type": "string",
+          "default": "foundation",
+          "scope": "machine",
+          "description": "Path to the Foundation development CLI."
+        },
+        "foundation.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run Foundation static checks after saving a Go file."
+        },
+        "foundation.checkPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "./..."
+          ],
+          "description": "Go package patterns passed to foundation check and generate."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

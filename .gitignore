@@ -1,0 +1,15 @@
+# Build output
+/dist/
+/foundation
+
+# Generated documentation
+/_site/
+
+# Compliance scan output
+/compliance/
+/sbom*.json
+/report-*.html
+/report-*.txt
+
+# Editor integration dependencies
+/editors/vscode/node_modules/

@@ -1,135 +1,147 @@
 <div align="center">
   <img src="https://github.com/mirkobrombin/go-foundation/blob/main/logo.png?raw=true" height="128"/>
-  <h1>go-foundation</h1>
-  <p>The standard library's missing standard library.</p>
+  <h1>go-foundation v2</h1>
+  <p>A Go application foundation with development-time checks.</p>
   <p>
-    <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go" alt="Go 1.24+">
-    <img src="https://img.shields.io/badge/deps-none-success" alt="Zero dependencies">
+    <img src="https://img.shields.io/badge/Go-1.25.12+-00ADD8?logo=go" alt="Go 1.25.12+">
+    <img src="https://img.shields.io/badge/runtime_deps-none-success" alt="Zero runtime dependencies">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
-    <img src="https://img.shields.io/github/v/tag/mirkobrombin/go-foundation?label=version" alt="version">
-  </p>
-  <p>
-    <a href="https://go-foundation.bromb.in"><strong>Read the Documentation</strong></a>
-  </p>
-  <p>
-    <a href="docs/foundation-project.md">Foundation project shape</a>
-    |
-    <a href="docs/foundation-doctor.md">Foundation Doctor</a>
-    |
-    <a href="docs/go-module-router-migration.md">go-module-router migration</a>
   </p>
 </div>
 
----
+Foundation v2 keeps Go as the language and moves framework knowledge into tools
+that can report errors while code is being written. Contracts are visible to the
+compiler, route and action registries are generated, dependency wiring is checked,
+and the VS Code extension connects Foundation metadata to editor navigation.
 
-## Packages
+## Install
 
-| Package | Description |
-|---------|-------------|
-| `hosting` | Application host with ConfigureServices / ConfigureWeb / DI / auto-start |
-| `srv` | Minimal API server with routing, middleware, model binding, auth, validation, rate limit |
-| `di` | Typed dependency injection (Singleton/Scoped/Transient) |
-| `configuration` | Multi-source config (env, file, flags) |
-| `options` | Functional options, `Options[T]`, merge, validation |
-| `scheduler` | Cron-based background jobs, fire-and-forget, delayed |
-| `actions` | Struct-tagged commands with key bindings and optional events |
-| `caching` | `Cache[T]` + `DistributedCache` interface + `DistributedBridge[T]` |
-| `serializer` | JSON serialization policy (SnakeCase, CamelCase, custom types) |
-| `telemetry` | Metrics and trace provider interfaces, simple meters, exporters |
-| `testutil` | `TestHost` (DI + HTTP test server), `FakeLogger`, `TestResponse` |
-| `validation` | Struct tag validation (required, email, min/max) |
-| `pipeline` | Generic middleware pipeline |
-| `health` | Health check registry |
-| `events` | Type-safe event bus (middleware, wildcard, async) |
-| `tracing` | Small `Tracer`/`Span` abstraction for code that only needs spans |
-| `pooling` | Generic `Pool[T]` with finalizer |
-| `errutil` | `Auto()`, `Wrap()`, `WError`, `Print()`, `Recover()`, `JoinErrors()` |
-| `auth` | Token signing with key rotation (HMAC, RSA, ECDSA, EdDSA) |
-| `guard` | ABAC authorization via struct tags |
-| `relay` | Background job processor (pub/sub with context propagation) |
-| `httpx` | HTTP client middleware (retry, circuit breaker, logging) |
-| `logger` | Structured logging (console, CLEF, async) |
-| `plugin` | Plugin registry + lifecycle + sandbox exec |
-| `secrets` | Secret stores (memory, env, cipher, prefix, fallback) |
-| `worker` | Fixed-size goroutine pool |
-| `metrics` | Counter, Gauge, Histogram, Timer |
-| `saga` | Saga pattern with compensation LIFO |
-| `fsm` | Declarative finite state machine |
-| `tags` | Generic struct tag parser (cached) |
-| `hooks` | Lifecycle hook discovery + runner |
-| `resiliency` | Circuit breaker, retry, rate limiter, bulkhead |
-| `safemap` | Thread-safe map + sharded map with TTL |
-| `collections` | Set, OrderedSet, Queue, MultiMap, BiMap |
-| `lock` | Lock interface + in-memory implementation |
-| `reflectutil` | String-to-type binding + struct population |
-| `adapters` | Pluggable adapter registry |
-| `result` | `Result[T]` monad |
-| `ring` | Ring buffer (generic + byte) |
-| `cpio` | CPIO newc reader/writer |
-| `align` | Power-of-2 alignment |
-| `contracts` | Zero-cost interface contract markers |
-| `pointer` | Field offset registry |
-| `doctor` | Build-tag startup checks for foundation services |
-
-## Foundation Doctor
-
-Compile a service with `run_foundation_doctor` to run startup checks before the HTTP host starts.
+Until the first v2 release is tagged, install the CLI from a source checkout:
 
 ```sh
-go build -tags run_foundation_doctor -o api ./cmd/api
-FOUNDATION_DOCTOR=fail ./api
+(cd dev && go install ./cmd/foundation)
 ```
 
-See [Foundation Doctor](docs/foundation-doctor.md) for modes and checks.
+After `v2.0.0` and `dev/v2.0.0` are published:
 
-## Panicking, but with style
+```sh
+go get github.com/mirkobrombin/go-foundation/v2@v2.0.0
+go install github.com/mirkobrombin/go-foundation/dev/v2/cmd/foundation@v2.0.0
+```
+
+The runtime module has no third-party dependencies. Development tools live in a
+separate module and use the official Go analysis packages.
+
+## Static workflow
+
+Declare contracts and application metadata in normal Go:
 
 ```go
-defer errutil.Auto() // put this once at the top of main()
+type UserStore interface {
+    Find(int) (User, bool)
+}
 
-// to get panics like this:
-  panic: runtime error: invalid memory address or nil pointer dereference
+type MemoryUserStore struct {
+    contracts.Implements[UserStore]
+}
 
-  1. main.main()
-     /app/main.go:37
-          35  func main() {
-          36    defer errutil.Auto()
-     >>   37    serve()
-          38  }
+type GetUser struct {
+    _     struct{} `method:"GET" path:"/users/{id:int}"`
+    ID    int      `path:"id"`
+    Users UserStore `inject:"users"`
+}
 
-  2. main.serve
-     /app/main.go:9
-           7  func serve() {
-           8    h := &handler{}
-     >>    9    h.handleRequest()
-          10  }
-
-  3. main.(*handler).handleRequest
-     /app/main.go:15
-          13  
-          14  func (h *handler) handleRequest() {
-     >>   15    h.authMiddleware(func() { h.dbQuery("42") })
-          16  }
-
-  4. main.(*handler).authMiddleware
-     /app/main.go:19
-          17  
-          18  func (h *handler) authMiddleware(next func()) {
-     >>   19    token := h.extractToken()
-          20    if token == "" {
-
-  5. main.(*handler).extractToken
-     /app/main.go:28
-          26  func (h *handler) extractToken() string {
-          27    var t *string
-     >>   28    return *t    ← crash here
-          29  }
+func build() (*app.App, error) {
+    application := app.New().Provide("users", NewMemoryUserStore())
+    RegisterFoundation(application)
+    _, err := application.Build()
+    return application, err
+}
 ```
+
+Generate registration code and check the complete workspace:
+
+```sh
+foundation generate ./...
+foundation check ./...
+go test ./...
+```
+
+The generated file contains compile-time contract assertions and static
+constructors for HTTP handlers and actions. Runtime reflection remains available
+through `RegisterHTTP` and `RegisterActionHandler` for migration, but generated
+registration is the v2 default.
+
+See the [quickstart example](examples/quickstart/quickstart.go), exercised by its
+own test.
+
+Calling `App.Listen("")` binds to `127.0.0.1:8080`. Pass an explicit public
+address only when the service is intended to accept remote traffic. Use
+`App.ListenTLS` for direct HTTPS, or terminate TLS at a trusted reverse proxy.
+
+## Layers
+
+| Layer | Purpose | Examples |
+|---|---|---|
+| `core` | Runtime building blocks with no application dependency | contracts, caching, validation, configuration, events, telemetry |
+| `app` | Application composition and boundaries | DI, HTTP, actions, dispatcher, hosting, testing |
+| `dev` | Development-only analysis and generation | `foundation check`, `foundation generate` |
+| `editors` | Editor-specific presentation | VS Code diagnostics, CodeLens, hover, dependency navigation |
+
+The analyzer enforces the dependency direction: `core` cannot import `app`, and
+runtime packages cannot import `dev`.
+
+## Development-time checks
+
+`foundation check` reports:
+
+- invalid `contracts.Implements[T]` declarations;
+- invalid DI implementation and constructor registrations;
+- duplicate or malformed routes and actions;
+- route parameters without matching fields;
+- locally missing or mistyped named dependencies;
+- dispatches to locally unknown actions;
+- invalid literal scheduler registrations;
+- ignored binding errors;
+- forbidden layer imports.
+
+The compiler remains the authority for generated contract assertions. `go vet`,
+tests, and the race detector remain part of the expected verification path.
+
+## Typed APIs
+
+Named dependency keys can retain their Go type:
+
+```go
+var usersKey = di.NewKey[UserStore]("users")
+
+builder := di.NewBuilder()
+di.ProvideKey(builder, usersKey, store)
+container, err := builder.Build()
+users, ok := di.ResolveKey(container, usersKey)
+```
+
+Actions also have a typed path:
+
+```go
+router := actions.New()
+create := actions.NewTyped[CreateUser, User]("users.create")
+err := actions.HandleTyped(router, create, handler)
+result, err := actions.DispatchTyped(ctx, router, create, payload)
+```
+
+Use strings where they are part of external metadata. Use typed APIs inside Go
+code when the compiler can carry the relationship.
+
+## Documentation
+
+- [Project shape](docs/foundation-project.md)
+- [Development tools](docs/development-tools.md)
+- [V2 migration](docs/v2-migration.md)
+- [Foundation Doctor](docs/foundation-doctor.md)
+- [go-module-router migration](docs/go-module-router-migration.md)
+- [VS Code extension](editors/vscode/README.md)
 
 ## License
 
 MIT
-
-## Logo
-
-Created following the [gopher style](https://go.dev/blog/gopher).

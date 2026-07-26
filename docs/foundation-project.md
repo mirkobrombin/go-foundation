@@ -1,32 +1,31 @@
-# Foundation Project Shape
+# Foundation v2 Project Shape
 
-This guide shows how to shape a service that uses go-foundation without trying to use every package. Start with the runtime path first, then add support packages only when the service needs them.
+A Foundation service should expose its wiring in a small number of predictable
+files. The static registry is generated from types, so route and action ownership
+stays next to the code that implements it.
 
 ## Layout
 
 ```text
 cmd/api/main.go
 internal/config/config.go
-internal/handlers/health.go
+internal/contracts/users.go
 internal/handlers/users.go
+internal/actions/users.go
 internal/services/users.go
 internal/jobs/cleanup.go
 internal/testing/host.go
+internal/handlers/zz_foundation.gen.go
+internal/actions/zz_foundation.gen.go
 ```
 
-`cmd/api/main.go` owns process startup. It wires configuration, services, HTTP handlers, jobs, health checks, and shutdown.
+`cmd/api/main.go` owns process startup. `internal/contracts` contains interfaces
+shared across application packages. Handlers and actions declare Foundation
+metadata on their concrete types. Services implement contracts with explicit
+compiler-visible declarations.
 
-`internal/config` binds environment and file values into typed structs.
-
-`internal/handlers` contains HTTP endpoint structs. Keep request binding tags close to the handler that consumes them.
-
-`internal/services` contains application logic. HTTP, jobs, and dispatch handlers call this layer.
-
-`internal/jobs` contains scheduled or delayed work.
-
-`internal/testing` wraps `testutil.NewTestHost` with project defaults.
-
-Use [Foundation Doctor](foundation-doctor.md) in project templates so startup checks stay available without adding code to every service.
+Each package containing handlers or actions gets its own generated file. Do not
+edit generated files.
 
 ## Startup
 
@@ -34,91 +33,130 @@ Use [Foundation Doctor](foundation-doctor.md) in project templates so startup ch
 package main
 
 import (
-	"context"
-	"log"
+    "log"
 
-	"github.com/mirkobrombin/go-foundation/pkg/app"
+    "example.com/service/internal"
 )
 
 func main() {
-	a := app.New()
-
-	a.Provide("users", NewUserService())
-	a.RegisterHTTP(&GetUser{})
-	a.Schedule("cleanup", "*/5 * * * *", cleanup)
-
-	if err := a.Listen(":8080"); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func cleanup(ctx context.Context) error {
-	return nil
+    application, err := internal.Build()
+    if err != nil {
+        log.Fatal(err)
+    }
+    if err := application.Listen(":8080"); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
-Keep `main` small. If wiring grows, move it to a `buildApp` function and keep package registration in one place.
+Application wiring stays in the package that owns generated registration:
 
-## Handler Shape
+```go
+func Build() (*app.App, error) {
+    application := app.New().
+        Provide("users", services.NewUsers())
+
+    handlers.RegisterFoundation(application)
+    useractions.RegisterFoundation(application)
+    if _, err := application.Build(); err != nil {
+        return nil, err
+    }
+    return application, nil
+}
+```
+
+## Contracts
+
+Use a marker when the generator should own the assertion:
+
+```go
+type Users interface {
+    Find(context.Context, int) (User, error)
+}
+
+type UserService struct {
+    contracts.Implements[Users]
+}
+```
+
+Use `contracts.Assert` for an explicit assertion without generation:
+
+```go
+var _ = contracts.Assert[Users]((*UserService)(nil))
+```
+
+Both patterns fail during development. The marker also gives the Foundation
+analyzer and editor a stable relationship to display.
+
+## HTTP handlers
 
 ```go
 type GetUser struct {
-	_     struct{} `method:"GET" path:"/users/{id:int}"`
-	ID    int      `path:"id"`
-	Users *UserService `inject:"users"`
+    _     struct{} `method:"GET" path:"/users/{id:int}"`
+    ID    int      `path:"id"`
+    Users Users    `inject:"users"`
 }
 
 func (h *GetUser) Handle(ctx context.Context) (any, error) {
-	return h.Users.Get(ctx, h.ID)
+    return h.Users.Find(ctx, h.ID)
 }
 ```
 
-Handlers should bind input, call services, and return a response. Put branching business rules in services, not in endpoint structs.
+The analyzer checks method and path syntax, parameter fields, duplicate routes,
+and local named dependency types. The generated registry supplies a static
+constructor. `App.Build` validates dependency availability before serving.
 
-## Testing Shape
+## Actions
 
 ```go
-func newTestHost() *testutil.TestHost {
-	return testutil.NewTestHost(func(b *di.Builder, app *srv.Server) {
-		di.RegisterInstance[*UserService](b, NewUserService())
-		app.RegisterHandler(&GetUser{}, b.MustBuild())
-	})
+type CreateUser struct {
+    _     struct{} `action:"users.create" keys:"ctrl+n"`
+    Name  string `json:"name"`
+    Users Users `inject:"users"`
+}
+
+func (a *CreateUser) Handle(ctx context.Context) (any, error) {
+    return a.Users.Create(ctx, a.Name)
 }
 ```
 
-Use one project helper for test hosts so every package gets the same DI setup, routes, middleware, and cleanup behavior.
+Use typed actions when the caller and handler are both Go code and no string
+metadata is required.
 
-## Package Choice
+## Testing
 
-Use these first:
+Use `app/testing` for host-level tests and the focused package APIs for unit
+tests:
 
-- `app`, `hosting`, `srv`: runtime and HTTP.
-- `di`: service wiring.
-- `configuration`: typed config.
-- `bind`, `validation`: request input.
-- `actions`: CLI, TUI, desktop, and editor commands.
-- `scheduler`: background jobs.
-- `health`: readiness checks.
-- `testutil`: HTTP and DI tests.
+```go
+func newTestHost() *apptest.TestHost {
+    return apptest.NewTestHost(func(builder *di.Builder) {
+        builder.Provide("users", newFakeUsers())
+    }, func(server *web.Server, container *di.Container) error {
+        return server.RegisterDefinition(handlerDefinition, container)
+    })
+}
+```
 
-Add the rest only when the service has that problem:
+Run the same static steps locally and in CI:
 
-- `caching` for process or backend caches.
-- `events`, `relay`, `dispatcher` for in-process or brokered work.
-- `saga`, `fsm` for workflows with state.
-- `secrets` for environment, encrypted, or Vault-backed secrets.
-- `telemetry` for metrics, exporters, and provider-level instrumentation.
-- `tracing` for small packages that only need span boundaries.
+```sh
+foundation generate -check ./...
+foundation check ./...
+go test -race ./...
+go vet ./...
+```
 
-## Rule of Thumb
+## Reading order
 
-A foundation-based service should be readable in this order:
+New contributors should be able to understand a service in this order:
 
 1. `cmd/api/main.go`
-2. `internal/config`
-3. `internal/handlers`
-4. `internal/services`
-5. `internal/jobs`
-6. `internal/testing`
+2. application `Build`
+3. contracts
+4. handlers and actions
+5. services and jobs
+6. tests
 
-If a new contributor cannot find startup, routes, services, and tests in that order, fix the project shape before adding more packages.
+If routes, dependencies, or registrations require a runtime trace to discover,
+move that relationship into a contract, typed key, or generated registry.

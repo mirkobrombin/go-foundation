@@ -24,7 +24,7 @@ Unknown values are treated like `print`.
 
 ## Checks
 
-The first version checks the HTTP route table exposed by `srv.Server`:
+The first version checks the HTTP route table exposed by `web.Server`:
 
 - At least one route is registered.
 - No duplicate `METHOD path` pair exists.
@@ -35,7 +35,7 @@ Missing routes are failures. Missing health routes are warnings, because some se
 
 ## Automatic Integration
 
-The build tag activates startup hooks in `pkg/app` and `pkg/srv`.
+The build tag activates startup hooks in `app` and `app/web`.
 
 ```go
 a := app.New()
@@ -48,17 +48,17 @@ if err := a.Listen(":8080"); err != nil {
 
 With `run_foundation_doctor`, `app.Listen` runs the doctor after `Build` has registered handlers and before the HTTP host starts.
 
-The same tag also runs the doctor when a project starts `srv.Server` directly:
+The same tag also runs the doctor when a project starts `web.Server` directly:
 
 ```go
-s := srv.New()
-s.MapGet("/health/live", live)
-s.MapGet("/health/ready", ready)
+server := web.New()
+server.MapGet("/health/live", live)
+server.MapGet("/health/ready", ready)
 
-log.Fatal(s.ListenAndServe(":8080"))
+log.Fatal(server.ListenAndServe(":8080"))
 ```
 
-`hosting.ConfigureWeb` uses `srv.Server`, so that path is covered too.
+`hosting.ConfigureWeb` uses `web.Server`, so that path is covered too.
 
 ## Direct Use
 

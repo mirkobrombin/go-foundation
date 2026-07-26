@@ -6,13 +6,13 @@
 
 | go-module-router | go-foundation |
 |------------------|---------------|
-| `pkg/transport/http` | `pkg/app`, `pkg/srv` |
-| `pkg/core.Container` | `pkg/di` |
-| `pkg/core.Binder` | `pkg/bind`, `pkg/reflectutil` |
-| `pkg/swagger` | `pkg/openapi` |
-| `pkg/transport/action` | `pkg/actions` |
-| `pkg/transport/relay` | `pkg/relay` |
-| `pkg/logger` | `pkg/logger` |
+| `pkg/transport/http` | `app`, `app/web` |
+| `pkg/core.Container` | `app/di` |
+| `pkg/core.Binder` | `core/bind`, `core/reflectutil` |
+| `pkg/swagger` | `core/openapi` |
+| `pkg/transport/action` | `app/actions` |
+| `pkg/transport/relay` | `core/relay` |
+| `pkg/logger` | `core/logger` |
 
 ## HTTP
 
@@ -30,7 +30,7 @@ New:
 ```go
 a := app.New()
 a.Provide("Users", users)
-a.RegisterHTTP(&GetUser{})
+RegisterFoundation(a)
 
 if err := a.Listen(":8080"); err != nil {
 	log.Fatal(err)
@@ -83,11 +83,13 @@ func (a *SaveAction) Handle(ctx context.Context) (any, error) {
 Standalone:
 
 ```go
-r := actions.New()
-r.Provide("Document", doc)
-r.Register(&SaveAction{})
+router := actions.New()
+router.Provide("Document", doc)
+if err := router.RegisterDefinition(actionDefinition); err != nil {
+	log.Fatal(err)
+}
 
-result, err := r.Dispatch(ctx, "file.save", map[string]any{
+result, err := router.Dispatch(ctx, "file.save", map[string]any{
 	"name": "notes.md",
 })
 ```
@@ -97,7 +99,7 @@ Through `app`:
 ```go
 a := app.New()
 a.Provide("Document", doc)
-a.RegisterActionHandler(&SaveAction{})
+RegisterFoundation(a)
 
 result, err := a.Dispatch(ctx, "file.save", map[string]any{
 	"name": "notes.md",
