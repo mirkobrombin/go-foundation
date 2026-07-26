@@ -98,7 +98,7 @@ func TestWriteRejectsUnknownGeneratedRegistration(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(
 		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/empty\n\ngo 1.25.12\n"),
+		[]byte("module example.com/empty\n\ngo 1.25\n"),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func sampleModule(t *testing.T, valid bool) string {
 	root := filepath.Clean(filepath.Join(filepath.Dir(current), "..", ".."))
 	goMod := fmt.Sprintf(`module example.com/sample
 
-go 1.25.12
+go 1.25
 
 require github.com/mirkobrombin/go-foundation/v2 v2.0.0
 

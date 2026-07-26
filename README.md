@@ -3,7 +3,7 @@
   <h1>go-foundation v2</h1>
   <p>A Go application foundation with development-time checks.</p>
   <p>
-    <img src="https://img.shields.io/badge/Go-1.25.12+-00ADD8?logo=go" alt="Go 1.25.12+">
+    <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go 1.25+">
     <img src="https://img.shields.io/badge/runtime_deps-none-success" alt="Zero runtime dependencies">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   </p>

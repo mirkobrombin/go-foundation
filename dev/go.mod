@@ -1,6 +1,6 @@
 module github.com/mirkobrombin/go-foundation/dev/v2
 
-go 1.25.12
+go 1.25
 
 require golang.org/x/tools v0.42.0
 
