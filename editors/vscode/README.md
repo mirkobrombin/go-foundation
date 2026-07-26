@@ -18,11 +18,18 @@ gopls cannot follow. This extension resolves them like a compiled reference:
 |---|---|---|
 | `contracts.Implements[UserStore]` | Go to Definition | the `UserStore` declaration |
 | `contracts.Assert[UserStore]((*Cached)(nil))` | Go to Definition | the `UserStore` declaration |
-| `type UserStore interface` | Go to Implementations | every type declaring that contract |
+| `type UserStore interface` | Go to Implementations, or click the CodeLens | a peek list of every type declaring that contract |
 | an implementing type name | Go to Implementations | the contracts it declares |
 | `inject:"users"` | Go to Definition | the matching `Provide("users", ...)` |
 | `Provide("users", ...)` | Find References | every field injecting that name |
 | a route or action tag | click the CodeLens | where the type is registered |
+
+An interface that has implementations carries a CodeLens with their count, for
+example `Foundation: 2 implementations`. Clicking it opens the reference peek:
+the list of implementations on one side, the code of the selected one on the
+other. Enter or a double click opens an entry in the editor, Escape closes the
+peek. A list is never collapsed into a jump, not even when it holds one entry,
+because the point of asking is seeing everything that answers.
 
 `contracts.Assert` markers count as implementations, so generated and manually
 wired types appear in the same list. When a route has no registration, the

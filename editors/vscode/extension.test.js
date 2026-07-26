@@ -81,6 +81,8 @@ function documentFor(name) {
 }
 
 const messages = [];
+const executed = [];
+const opened = [];
 const registered = { commands: new Map(), providers: {} };
 
 const vscodeStub = {
@@ -113,7 +115,10 @@ const vscodeStub = {
       registered.commands.set(name, handler);
       return { dispose() {} };
     },
-    executeCommand: async () => undefined,
+    executeCommand: async (name, ...args) => {
+      executed.push({ name, args });
+      return undefined;
+    },
   },
   languages: {
     createDiagnosticCollection: () => ({
@@ -148,7 +153,10 @@ const vscodeStub = {
     showInformationMessage: (message) => messages.push(message),
     showWarningMessage: (message) => messages.push(message),
     showErrorMessage: (message) => messages.push(message),
-    showTextDocument: async () => undefined,
+    showTextDocument: async (target) => {
+      opened.push(target.fsPath ?? target.uri?.fsPath);
+      return undefined;
+    },
   },
   workspace: {
     isTrusted: true,
@@ -186,6 +194,19 @@ setFile(
 
 type UserStore interface {
 	Find(int) (User, bool)
+}
+
+type Clock interface {
+	Now() int64
+}
+`,
+);
+setFile(
+  "clock.go",
+  `package app
+
+type SystemClock struct {
+	contracts.Implements[Clock]
 }
 `,
 );
@@ -289,6 +310,54 @@ test("offers navigating lenses instead of plain labels", async () => {
   assert.equal(lenses[0].command.title, "Foundation contract UserStore");
   assert.equal(lenses[0].command.command, "foundation.revealTargets");
   assert.equal(lenses[0].command.arguments[2], "definition");
+});
+
+test("opens the full implementation list instead of jumping to one", async () => {
+  const reveal = registered.commands.get("foundation.revealTargets");
+  const position = positionOf("contracts.go", "UserStore interface", 1);
+
+  executed.length = 0;
+  opened.length = 0;
+  await reveal(uriFor("contracts.go"), position, "references");
+
+  const peek = executed.find((call) => call.name === "editor.action.showReferences");
+  assert.ok(peek, "the reference peek must be used for implementation lists");
+  assert.deepEqual(
+    peek.args[2].map((location) => location.uri.fsPath).sort(),
+    ["/workspace/cached.go", "/workspace/memory.go"],
+  );
+  assert.deepEqual(opened, ["/workspace/contracts.go"]);
+});
+
+test("keeps showing the list when a contract has a single implementation", async () => {
+  const reveal = registered.commands.get("foundation.revealTargets");
+
+  executed.length = 0;
+  await reveal(
+    uriFor("contracts.go"),
+    positionOf("contracts.go", "Clock interface", 1),
+    "references",
+  );
+
+  const peek = executed.find((call) => call.name === "editor.action.showReferences");
+  assert.ok(peek);
+  assert.deepEqual(
+    peek.args[2].map((location) => location.uri.fsPath),
+    ["/workspace/clock.go"],
+  );
+});
+
+test("counts implementations in the interface lens", async () => {
+  const document = documentFor("contracts.go");
+  await registered.providers.lens.provideCodeLenses(document);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const lenses = await registered.providers.lens.provideCodeLenses(document);
+
+  assert.deepEqual(
+    lenses.map((lens) => lens.command.title).sort(),
+    ["Foundation: 1 implementation", "Foundation: 2 implementations"],
+  );
+  assert.equal(lenses[0].command.arguments[2], "references");
 });
 
 test("resolves a route lens to the registration site", async () => {

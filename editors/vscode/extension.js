@@ -299,20 +299,26 @@ async function revealTargets(uri, position, mode) {
     vscode.window.showInformationMessage(emptyMessage(mode));
     return;
   }
-  if (found.length === 1) {
+
+  // A declaration has a single canonical answer, so jumping there is the whole
+  // point. Every other question is a list, and a list has to be shown in full:
+  // jumping to one entry hides the others. The reference peek keeps the list on
+  // one side and the code of the selected entry on the other, and opens an
+  // entry on Enter or double click.
+  if (mode === "definition" && found.length === 1) {
     const target = found[0];
     await vscode.window.showTextDocument(target.uri, {
       selection: new vscode.Range(target.range.start, target.range.start),
     });
     return;
   }
+
   await vscode.window.showTextDocument(document, { preserveFocus: false });
   await vscode.commands.executeCommand(
-    "editor.action.peekLocations",
+    "editor.action.showReferences",
     uri,
     position,
     found,
-    "peek",
   );
 }
 
@@ -326,17 +332,17 @@ function emptyMessage(mode) {
   return "No Foundation declaration found for this position.";
 }
 
-async function contractsWithImplementations(folder, token) {
+async function implementationCounts(folder, token) {
   const key = folder.uri.toString();
   const cached = contractIndex.get(key);
   if (cached?.pending || (cached && Date.now() - cached.at <= indexLifetime)) {
-    return cached.names;
+    return cached.counts;
   }
 
-  const previous = cached?.names ?? new Set();
-  contractIndex.set(key, { at: cached?.at ?? 0, names: previous, pending: true });
+  const previous = cached?.counts ?? new Map();
+  contractIndex.set(key, { at: cached?.at ?? 0, counts: previous, pending: true });
 
-  const names = new Set();
+  const counts = new Map();
   try {
     const files = await vscode.workspace.findFiles(
       new vscode.RelativePattern(folder, "**/*.go"),
@@ -359,16 +365,16 @@ async function contractsWithImplementations(folder, token) {
       const bytes = await vscode.workspace.fs.readFile(uri);
       const text = Buffer.from(bytes).toString("utf8");
       for (const marker of core.contractMarkers(text)) {
-        names.add(marker.contract);
+        counts.set(marker.contract, (counts.get(marker.contract) ?? 0) + 1);
       }
     }
   } catch {
-    contractIndex.set(key, { at: cached?.at ?? 0, names: previous, pending: false });
+    contractIndex.set(key, { at: cached?.at ?? 0, counts: previous, pending: false });
     return previous;
   }
 
-  contractIndex.set(key, { at: Date.now(), names, pending: false });
-  return names;
+  contractIndex.set(key, { at: Date.now(), counts, pending: false });
+  return counts;
 }
 
 class FoundationCodeLensProvider {
@@ -407,8 +413,8 @@ class FoundationCodeLensProvider {
     const known = contractIndex.get(folder.uri.toString());
     const stale = !known || Date.now() - known.at > indexLifetime;
     if (stale && !known?.pending) {
-      contractsWithImplementations(folder, token).then((names) => {
-        if (names.size > 0) {
+      implementationCounts(folder, token).then((counts) => {
+        if (counts.size > 0) {
           this.refresh();
         }
       });
@@ -418,14 +424,18 @@ class FoundationCodeLensProvider {
     }
 
     for (const declaration of interfaces) {
-      if (!known.names.has(declaration.name)) {
+      const count = known.counts.get(declaration.name);
+      if (!count) {
         continue;
       }
       const position = document.positionAt(declaration.index);
       lenses.push(
         new vscode.CodeLens(new vscode.Range(position, position), {
           command: "foundation.revealTargets",
-          title: "Foundation implementations",
+          title:
+            count === 1
+              ? "Foundation: 1 implementation"
+              : `Foundation: ${count} implementations`,
           arguments: [document.uri, position, "references"],
         }),
       );
