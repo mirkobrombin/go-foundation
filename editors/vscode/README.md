@@ -9,6 +9,8 @@ This VS Code extension adds Foundation-specific information on top of gopls:
 - CodeLens and hover text for routes, actions, injected dependencies, and contracts;
 - a command for deterministic registry generation.
 
+![Implementations of a contract shown in the peek view](https://raw.githubusercontent.com/mirkobrombin/go-foundation/main/docs/images/vscode-implementations.png)
+
 ## Navigation
 
 Foundation relationships are written as type parameters and struct tags, which

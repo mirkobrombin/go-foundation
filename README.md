@@ -108,6 +108,23 @@ runtime packages cannot import `dev`.
 The compiler remains the authority for generated contract assertions. `go vet`,
 tests, and the race detector remain part of the expected verification path.
 
+## Editor navigation
+
+A contract is a type parameter and a dependency is a struct tag, so a Go editor
+cannot follow either on its own. The VS Code extension reads them and answers
+the two questions that matter while writing code: what implements this, and
+where does this come from.
+
+![Implementations of a contract shown in the VS Code peek view](docs/images/vscode-implementations.png)
+
+The screenshot is the quickstart example. `UserStore` carries a CodeLens with
+the number of implementations found in the workspace, and clicking it opens the
+peek: the implementations on one side, the code of the selected one on the
+other. `MemoryUserStore` declares the relationship with
+`contracts.Implements[UserStore]`, which is also a CodeLens leading back to the
+interface. The same navigation works between `inject:"users"` and
+`Provide("users", ...)`, in both directions.
+
 ## Typed APIs
 
 Named dependency keys can retain their Go type:
