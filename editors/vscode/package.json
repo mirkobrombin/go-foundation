@@ -2,7 +2,7 @@
   "name": "foundation-go",
   "displayName": "Foundation for Go",
   "description": "Static diagnostics, metadata, and navigation for Foundation v2 projects.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "mirkobrombin",
   "license": "MIT",
   "repository": {
@@ -38,10 +38,6 @@
       {
         "command": "foundation.generate",
         "title": "Foundation: Generate Static Registries"
-      },
-      {
-        "command": "foundation.showMetadata",
-        "title": "Foundation: Show Metadata"
       }
     ],
     "configuration": {

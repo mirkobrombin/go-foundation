@@ -91,8 +91,15 @@ The extension under `editors/vscode` adds:
 
 - diagnostics from the CLI;
 - CodeLens and hover details for Foundation metadata;
-- definition and reference lookup for named dependencies;
+- definition, implementation, and reference lookup across the contract graph and
+  named dependencies, in both directions;
+- navigation from a route or action to the code that registers it;
 - check and generate commands.
+
+Contract navigation reads `contracts.Implements[T]` and `contracts.Assert[T]`
+markers, so an interface reports every implementation, and an implementation
+reports the contracts it declares. Dependency navigation works from the injected
+field to the provider and from the provider back to every injected field.
 
 gopls continues to own Go symbols, method sets, references, and compiler
 diagnostics. The extension adds only Foundation relationships that gopls cannot

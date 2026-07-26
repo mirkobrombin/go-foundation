@@ -229,6 +229,164 @@ function scanMetadata(text) {
   return metadata.sort((left, right) => left.index - right.index);
 }
 
+function typeDeclarations(text) {
+  const masked = scanGoSource(text).masked;
+  const declarations = [];
+  const single = /\btype\s+([A-Za-z_]\w*)(?:\[[^\]]*\])?\s+(interface|struct)\b/dg;
+  for (const match of masked.matchAll(single)) {
+    declarations.push({
+      name: match[1],
+      kind: match[2],
+      index: match.indices[1][0],
+    });
+  }
+
+  // Grouped declarations: type ( Reader interface { ... } ).
+  for (const block of masked.matchAll(/\btype\s*\(/g)) {
+    const start = block.index + block[0].length;
+    let depth = 1;
+    let index = start;
+    while (index < masked.length && depth > 0) {
+      if (masked[index] === "(") {
+        depth += 1;
+      } else if (masked[index] === ")") {
+        depth -= 1;
+      }
+      index += 1;
+    }
+    const body = masked.slice(start, Math.max(start, index - 1));
+    const entry = /(?:^|\n)[ \t]*([A-Za-z_]\w*)(?:\[[^\]]*\])?\s+(interface|struct)\b/dg;
+    for (const match of body.matchAll(entry)) {
+      declarations.push({
+        name: match[1],
+        kind: match[2],
+        index: start + match.indices[1][0],
+      });
+    }
+  }
+
+  return declarations.sort((left, right) => left.index - right.index);
+}
+
+function typeDeclarationAt(text, offset) {
+  for (const declaration of typeDeclarations(text)) {
+    if (
+      offset >= declaration.index &&
+      offset <= declaration.index + declaration.name.length
+    ) {
+      return declaration;
+    }
+  }
+  return undefined;
+}
+
+function enclosingType(masked, offset) {
+  const pattern = /\btype\s+([A-Za-z_]\w*)(?:\[[^\]]*\])?\s+struct\b/dg;
+  let enclosing;
+  for (const match of masked.slice(0, offset).matchAll(pattern)) {
+    enclosing = { typeName: match[1], typeIndex: match.indices[1][0] };
+  }
+  return enclosing;
+}
+
+function enclosingTypeAt(text, offset) {
+  return enclosingType(scanGoSource(text).masked, offset)?.typeName;
+}
+
+function contractMarkers(text) {
+  const masked = scanGoSource(text).masked;
+  const markers = [];
+
+  for (const match of masked.matchAll(/contracts\.Implements\[([^\]]+)\]/dg)) {
+    markers.push({
+      contract: match[1].trim(),
+      kind: "implements",
+      index: match.index,
+      length: match[0].length,
+      ...enclosingType(masked, match.index),
+    });
+  }
+
+  const assertion =
+    /contracts\.Assert\[([^\]]+)\]\(\s*(?:\(\s*\*\s*([A-Za-z_]\w*)\s*\))?/dg;
+  for (const match of masked.matchAll(assertion)) {
+    markers.push({
+      contract: match[1].trim(),
+      kind: "assert",
+      index: match.index,
+      length: match[0].length,
+      typeName: match[2],
+      typeIndex: match[2] ? match.indices[2][0] : undefined,
+    });
+  }
+
+  return markers.sort((left, right) => left.index - right.index);
+}
+
+function contractAt(text, offset) {
+  for (const marker of contractMarkers(text)) {
+    if (offset >= marker.index && offset <= marker.index + marker.length) {
+      return marker.contract;
+    }
+  }
+  return undefined;
+}
+
+function contractOffsets(text, name) {
+  return contractMarkers(text)
+    .filter((marker) => marker.contract === name)
+    .map((marker) => marker.typeIndex ?? marker.index);
+}
+
+function contractsOfType(text, typeName) {
+  const contracts = [];
+  for (const marker of contractMarkers(text)) {
+    if (marker.typeName === typeName && !contracts.includes(marker.contract)) {
+      contracts.push(marker.contract);
+    }
+  }
+  return contracts;
+}
+
+function declarationOffsets(text, name) {
+  const declarations = typeDeclarations(text).filter(
+    (declaration) => declaration.name === name,
+  );
+  const interfaces = declarations.filter(
+    (declaration) => declaration.kind === "interface",
+  );
+  const selected = interfaces.length > 0 ? interfaces : declarations;
+  return selected.map((declaration) => declaration.index);
+}
+
+function typeUsageOffsets(text, typeName) {
+  const masked = scanGoSource(text).masked;
+  const offsets = [];
+  const pattern = new RegExp(`&?\\b${typeName}\\s*\\{`, "g");
+  for (const match of masked.matchAll(pattern)) {
+    const prefix = masked.slice(Math.max(0, match.index - 6), match.index);
+    if (/\btype\s+$/.test(prefix)) {
+      continue;
+    }
+    offsets.push(match.index);
+  }
+  return offsets;
+}
+
+function providerKeyAt(text, offset) {
+  const source = scanGoSource(text);
+  for (const literal of source.strings) {
+    if (offset < literal.start || offset > literal.end) {
+      continue;
+    }
+    const start = Math.max(0, literal.start - 256);
+    if (/\.Provide\(\s*$/.test(source.masked.slice(start, literal.start))) {
+      return literal.value;
+    }
+  }
+  return undefined;
+}
+
 function dependencyAt(text, offset) {
   for (const tag of scanGoSource(text).tags) {
     const dependency = tagAttributes(tag).get("inject");
@@ -272,11 +430,21 @@ function dependencyOffsets(text, key) {
 }
 
 module.exports = {
+  contractAt,
+  contractMarkers,
+  contractOffsets,
+  contractsOfType,
+  declarationOffsets,
   dependencyAt,
   dependencyOffsets,
+  enclosingTypeAt,
   parseAnalyzerOutput,
   positionAt,
+  providerKeyAt,
   providerOffsets,
   scanMetadata,
+  typeDeclarationAt,
+  typeDeclarations,
+  typeUsageOffsets,
   validatePackagePatterns,
 };

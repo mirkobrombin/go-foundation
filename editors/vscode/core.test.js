@@ -86,6 +86,101 @@ type Real struct {
   );
 });
 
+test("finds type declarations, including grouped ones", () => {
+  const source = `
+type UserStore interface {
+  Find(int) (User, bool)
+}
+
+type MemoryUserStore struct {
+  contracts.Implements[UserStore]
+}
+
+type (
+  Reader interface { Read() error }
+  Buffer struct { data []byte }
+)
+
+type Registry[T any] struct { items []T }
+`;
+  assert.deepEqual(
+    core.typeDeclarations(source).map((item) => [item.name, item.kind]),
+    [
+      ["UserStore", "interface"],
+      ["MemoryUserStore", "struct"],
+      ["Reader", "interface"],
+      ["Buffer", "struct"],
+      ["Registry", "struct"],
+    ],
+  );
+
+  const onName = source.indexOf("UserStore interface") + 2;
+  assert.deepEqual(core.typeDeclarationAt(source, onName), {
+    name: "UserStore",
+    kind: "interface",
+    index: source.indexOf("UserStore interface"),
+  });
+  assert.equal(core.typeDeclarationAt(source, source.indexOf("Find(int)")), undefined);
+});
+
+test("links a contract marker to its implementing type", () => {
+  const source = `
+type MemoryUserStore struct {
+  contracts.Implements[UserStore]
+}
+
+var _ = contracts.Assert[UserStore]((*CachedUserStore)(nil))
+
+// contracts.Implements[Commented]
+`;
+  const markers = core.contractMarkers(source);
+  assert.deepEqual(
+    markers.map((marker) => [marker.contract, marker.kind, marker.typeName]),
+    [
+      ["UserStore", "implements", "MemoryUserStore"],
+      ["UserStore", "assert", "CachedUserStore"],
+    ],
+  );
+
+  const inside = source.indexOf("contracts.Implements[UserStore]") + 5;
+  assert.equal(core.contractAt(source, inside), "UserStore");
+  assert.equal(core.contractsOfType(source, "MemoryUserStore")[0], "UserStore");
+  assert.equal(core.contractOffsets(source, "UserStore").length, 2);
+  assert.equal(core.contractOffsets(source, "Missing").length, 0);
+});
+
+test("navigates from a contract name to its declaration", () => {
+  const source = `
+type UserStore interface {
+  Find(int) (User, bool)
+}
+`;
+  assert.deepEqual(core.declarationOffsets(source, "UserStore"), [
+    source.indexOf("UserStore"),
+  ]);
+  assert.deepEqual(core.declarationOffsets(source, "Absent"), []);
+});
+
+test("finds registration sites of a declared type", () => {
+  const source = `
+type GetUser struct{}
+
+func register() {
+  application.RegisterHTTP(&GetUser{})
+  handlers := []any{GetUser{}}
+  // application.RegisterHTTP(&GetUser{})
+}
+`;
+  assert.equal(core.typeUsageOffsets(source, "GetUser").length, 2);
+  assert.equal(core.typeUsageOffsets(source, "Other").length, 0);
+});
+
+test("reads the dependency key from a provider call", () => {
+  const source = `app.New().Provide("users", store)`;
+  assert.equal(core.providerKeyAt(source, source.indexOf("users") + 1), "users");
+  assert.equal(core.providerKeyAt(source, source.indexOf("store")), undefined);
+});
+
 test("links injected dependencies to providers", () => {
   const source = `
 type Endpoint struct {

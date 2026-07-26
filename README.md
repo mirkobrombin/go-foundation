@@ -86,7 +86,7 @@ address only when the service is intended to accept remote traffic. Use
 | `core` | Runtime building blocks with no application dependency | contracts, caching, validation, configuration, events, telemetry |
 | `app` | Application composition and boundaries | DI, HTTP, actions, dispatcher, hosting, testing |
 | `dev` | Development-only analysis and generation | `foundation check`, `foundation generate` |
-| `editors` | Editor-specific presentation | VS Code diagnostics, CodeLens, hover, dependency navigation |
+| `editors` | Editor-specific presentation | VS Code diagnostics, CodeLens, hover, contract and dependency navigation |
 
 The analyzer enforces the dependency direction: `core` cannot import `app`, and
 runtime packages cannot import `dev`.

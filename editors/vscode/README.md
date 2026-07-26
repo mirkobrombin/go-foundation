@@ -3,9 +3,31 @@
 This VS Code extension adds Foundation-specific information on top of gopls:
 
 - diagnostics from `foundation check`;
+- navigation across the contract graph, in both directions;
+- navigation between `inject:"name"` and `Provide("name", value)`, in both directions;
+- navigation from a route or action to the code that registers it;
 - CodeLens and hover text for routes, actions, injected dependencies, and contracts;
-- definition and reference lookup between `inject:"name"` and `Provide("name", value)`;
 - a command for deterministic registry generation.
+
+## Navigation
+
+Foundation relationships are written as type parameters and struct tags, which
+gopls cannot follow. This extension resolves them like a compiled reference:
+
+| From | Action | Goes to |
+|---|---|---|
+| `contracts.Implements[UserStore]` | Go to Definition | the `UserStore` declaration |
+| `contracts.Assert[UserStore]((*Cached)(nil))` | Go to Definition | the `UserStore` declaration |
+| `type UserStore interface` | Go to Implementations | every type declaring that contract |
+| an implementing type name | Go to Implementations | the contracts it declares |
+| `inject:"users"` | Go to Definition | the matching `Provide("users", ...)` |
+| `Provide("users", ...)` | Find References | every field injecting that name |
+| a route or action tag | click the CodeLens | where the type is registered |
+
+`contracts.Assert` markers count as implementations, so generated and manually
+wired types appear in the same list. When a route has no registration, the
+extension says so instead of failing silently: it usually means `foundation
+generate` has not run yet.
 
 Install the development CLI from the repository checkout:
 
