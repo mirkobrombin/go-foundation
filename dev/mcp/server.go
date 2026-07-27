@@ -10,7 +10,7 @@ import (
 )
 
 // Version is the server version reported during the protocol handshake.
-const Version = "2.0.0"
+const Version = "2.1.0"
 
 // instructions reach every connected client during initialisation. They are the
 // contract of use: a model that reads them knows what it must not improvise.
@@ -27,7 +27,10 @@ Rules of engagement, in order:
    foundation_declaration_rules for the topic you are about to write.
 3. Never present work as finished without calling foundation_verify. It builds,
    analyses, checks the generated registries, vets, and tests, and it reports
-   what actually happened.
+   what actually happened. When it passes it issues a receipt bound to the code
+   it ran on. Quote that receipt in your report. Editing anything after it voids
+   it, and foundation_receipt will say so to whoever asks. A claim of success
+   without a current receipt is a claim these tools contradict.
 4. When a diagnostic appears, call foundation_checks for its cause and fix
    instead of guessing a change that silences it.
 5. Generated registries belong in version control. Run foundation_generate after
@@ -67,8 +70,9 @@ func NewServer(workspace string) (*mcpsdk.Server, error) {
 		&mcpsdk.ServerOptions{Instructions: instructions},
 	)
 
+	state := newSession()
 	registerKnowledgeTools(server)
-	registerWorkspaceTools(server, workspace)
+	registerWorkspaceTools(server, workspace, state)
 	registerResources(server)
 	registerPrompts(server)
 	return server, nil
@@ -199,7 +203,7 @@ func registerKnowledgeTools(server *mcpsdk.Server) {
 			Rules: []string{
 				"Look up every symbol before using it. The catalog is the truth for this version.",
 				"Read the declaration rules before writing tags or routes.",
-				"Run foundation_verify before claiming anything works.",
+				"Run foundation_verify before claiming anything works, and quote the receipt it issues.",
 				"Commit generated registries.",
 				"Say plainly when a relationship can only be checked at build time.",
 			},
@@ -210,7 +214,8 @@ func registerKnowledgeTools(server *mcpsdk.Server) {
 				"Do not copy v1 code shapes: injection now needs an explicit inject tag and registration returns errors.",
 				"Do not silence a diagnostic with an ignore directive to make a build pass.",
 				"Do not edit zz_foundation.gen.go by hand.",
-				"Do not report success from reading code. Report it from foundation_verify output.",
+				"Do not report success from reading code. Report it from foundation_verify output, receipt included.",
+				"Do not reuse a receipt after editing a file. It is void, and foundation_receipt will say so.",
 			},
 			ToolsToUse: []string{
 				"foundation_packages, foundation_package_api, foundation_symbol: the API as it exists",
@@ -403,9 +408,15 @@ type generateInput struct {
 }
 
 type generateOutput struct {
-	Step  Step     `json:"step"`
-	Files []string `json:"files,omitempty"`
-	Note  string   `json:"note"`
+	Step         Step     `json:"step"`
+	Files        []string `json:"files,omitempty"`
+	Note         string   `json:"note"`
+	Verification *Status  `json:"verification,omitempty"`
+}
+
+type receiptInput struct {
+	Directory string `json:"directory,omitempty" jsonschema:"module directory, defaults to the server workspace"`
+	Receipt   string `json:"receipt,omitempty" jsonschema:"a receipt issued by foundation_verify; omit to ask for the current standing"`
 }
 
 type verifyInput struct {
@@ -431,17 +442,21 @@ type migrateOutput struct {
 	Note      string            `json:"note"`
 }
 
-func registerWorkspaceTools(server *mcpsdk.Server, workspace string) {
+func registerWorkspaceTools(server *mcpsdk.Server, workspace string, state *session) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:  "foundation_check",
 		Title: "Run the Foundation analyzer",
 		Description: "Runs the real analyzer over a module and returns structured diagnostics. " +
-			"It reports wiring that compiles and still cannot work, so it is not optional.",
+			"It reports wiring that compiles and still cannot work, so it is not optional. " +
+			"Passing this is not verification on its own: only foundation_verify issues a receipt.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in checkWorkspaceInput) (*mcpsdk.CallToolResult, CheckResult, error) {
-		result, err := RunCheck(ctx, orDefault(in.Directory, workspace), in.Patterns)
+		directory := orDefault(in.Directory, workspace)
+		result, err := RunCheck(ctx, directory, in.Patterns)
 		if err != nil {
 			return nil, CheckResult{}, err
 		}
+		status := state.status(result.Directory)
+		result.Verification = &status
 		return nil, *result, nil
 	})
 
@@ -451,15 +466,26 @@ func registerWorkspaceTools(server *mcpsdk.Server, workspace string) {
 		Description: "Runs the generator. Without check_only it writes zz_foundation.gen.go per declaring package " +
 			"and removes orphaned ones; with check_only it fails when a committed file is stale.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in generateInput) (*mcpsdk.CallToolResult, generateOutput, error) {
-		step, files, err := Generate(ctx, orDefault(in.Directory, workspace), in.Patterns, in.CheckOnly)
+		directory := orDefault(in.Directory, workspace)
+		step, files, err := Generate(ctx, directory, in.Patterns, in.CheckOnly)
 		if err != nil {
 			return nil, generateOutput{}, err
 		}
-		return nil, generateOutput{
+		resolved, resolveErr := resolveDir(directory)
+		if resolveErr == nil && !in.CheckOnly && len(files) > 0 {
+			state.recordWrite(resolved)
+			state.clearVerification(resolved)
+		}
+		out := generateOutput{
 			Step:  *step,
 			Files: files,
 			Note:  "commit generated files together with the declarations that produced them",
-		}, nil
+		}
+		if resolveErr == nil {
+			status := state.status(resolved)
+			out.Verification = &status
+		}
+		return nil, out, nil
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
@@ -467,13 +493,58 @@ func registerWorkspaceTools(server *mcpsdk.Server, workspace string) {
 		Title: "Build, analyse, check registries, vet and test",
 		Description: "The gate before reporting work as done. Runs go build, the Foundation analyzer, " +
 			"foundation generate -check, go vet and go test, and returns what each one said. " +
-			"Call it before telling a user that Foundation code works.",
+			"On success it issues a receipt bound to the code it verified: quote that receipt when you report, " +
+			"because it is void the moment a file changes. Reporting success without a current receipt is an " +
+			"unverified claim, and foundation_receipt will show it.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in verifyInput) (*mcpsdk.CallToolResult, VerifyResult, error) {
-		result, err := Verify(ctx, orDefault(in.Directory, workspace), in.Race)
+		directory := orDefault(in.Directory, workspace)
+		result, err := Verify(ctx, directory, in.Race)
 		if err != nil {
 			return nil, VerifyResult{}, err
 		}
+		if result.Passed {
+			if fingerprint, err := Fingerprint(result.Directory); err == nil {
+				result.Receipt = state.recordVerification(result.Directory, fingerprint)
+			}
+		} else {
+			state.clearVerification(result.Directory)
+		}
+		status := state.status(result.Directory)
+		result.Verification = &status
+		if !result.Passed {
+			result.NextActions = append(result.NextActions,
+				"No receipt was issued. Do not report this work as done.")
+		}
 		return nil, *result, nil
+	})
+
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:  "foundation_receipt",
+		Title: "Check a verification receipt",
+		Description: "Tells whether a receipt still matches the code as it stands, or asks for the current " +
+			"standing when no receipt is given. A receipt issued before the last edit is void, which is how " +
+			"a stale claim of success becomes visible.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in receiptInput) (*mcpsdk.CallToolResult, ReceiptStanding, error) {
+		directory := orDefault(in.Directory, workspace)
+		if strings.TrimSpace(in.Receipt) == "" {
+			resolved, err := resolveDir(directory)
+			if err != nil {
+				return nil, ReceiptStanding{}, err
+			}
+			status := state.status(resolved)
+			return nil, ReceiptStanding{
+				Receipt:   status.Receipt,
+				Directory: resolved,
+				Valid:     status.State == stateCurrent,
+				State:     status.State,
+				Verdict:   status.Guidance,
+			}, nil
+		}
+		standing, err := CheckReceipt(directory, in.Receipt)
+		if err != nil {
+			return nil, ReceiptStanding{}, err
+		}
+		return nil, *standing, nil
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
@@ -487,6 +558,10 @@ func registerWorkspaceTools(server *mcpsdk.Server, workspace string) {
 		if err != nil {
 			return nil, ScaffoldResult{}, err
 		}
+		state.recordWrite(result.Directory)
+		state.clearVerification(result.Directory)
+		status := state.status(result.Directory)
+		result.Verification = &status
 		return nil, *result, nil
 	})
 

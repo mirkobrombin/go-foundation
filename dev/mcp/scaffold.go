@@ -16,6 +16,9 @@ type ScaffoldResult struct {
 	Files     []string `json:"files"`
 	Next      []string `json:"next_actions"`
 	Notes     []string `json:"notes"`
+	// Verification is the standing of the directory right after scaffolding:
+	// never verified, because nothing has been run yet.
+	Verification *Status `json:"verification,omitempty"`
 }
 
 // Scaffold writes a Foundation application that compiles, passes the analyzer,

@@ -61,6 +61,24 @@ configuration.
 | `foundation_generate` | Write or verify the static registries. |
 | `foundation_verify` | Build, analyse, check registries, vet, test. The gate before reporting work as done. |
 | `foundation_migrate` | Where a v1 package went, and the behaviour changes an import rewrite misses. |
+| `foundation_receipt` | Whether a verification receipt still matches the code as it stands. |
+
+## Verification receipts
+
+A server cannot force an assistant to follow a procedure. It can make skipping
+one visible.
+
+When `foundation_verify` passes it fingerprints the Go sources and module files
+it ran on, and returns a receipt bound to that fingerprint. Editing anything
+afterwards voids it. `foundation_receipt` answers, for a given receipt, whether
+it matches the code in front of you: `verified`, `changed_since_verification`, or
+`never_verified`. An invented receipt fails the same way a stale one does.
+
+So the reader of a report has a question with a mechanical answer: *what receipt
+covers this?* A claim of success with no receipt, or with one issued before the
+last edit, is contradicted by the assistant's own tools. Scaffolding and
+generation clear the standing when they write, so freshly produced code always
+starts as unverified.
 
 Prompts: `foundation_new_service`, `foundation_migrate_v1`, `foundation_review`.
 Resources: the project documentation, embedded in the binary, served under

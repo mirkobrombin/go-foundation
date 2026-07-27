@@ -39,11 +39,12 @@ type Step struct {
 
 // CheckResult is the analyzer outcome for a workspace.
 type CheckResult struct {
-	Directory   string       `json:"directory"`
-	Patterns    []string     `json:"patterns"`
-	Passed      bool         `json:"passed"`
-	Diagnostics []Diagnostic `json:"diagnostics"`
-	Summary     string       `json:"summary"`
+	Directory    string       `json:"directory"`
+	Patterns     []string     `json:"patterns"`
+	Passed       bool         `json:"passed"`
+	Diagnostics  []Diagnostic `json:"diagnostics"`
+	Summary      string       `json:"summary"`
+	Verification *Status      `json:"verification,omitempty"`
 }
 
 // VerifyResult is the full verification of a workspace.
@@ -54,6 +55,11 @@ type VerifyResult struct {
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 	Summary     string       `json:"summary"`
 	NextActions []string     `json:"next_actions,omitempty"`
+	// Receipt is issued only when everything passed, and only for the code as it
+	// stood during the run. Reporting success without quoting it is a claim these
+	// tools do not support.
+	Receipt      string  `json:"receipt,omitempty"`
+	Verification *Status `json:"verification,omitempty"`
 }
 
 // RunCheck runs the Foundation analyzer over a workspace and returns its

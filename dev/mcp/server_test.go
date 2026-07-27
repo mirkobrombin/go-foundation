@@ -93,6 +93,7 @@ func TestServerExposesEveryTool(t *testing.T) {
 		"foundation_verify",
 		"foundation_scaffold",
 		"foundation_migrate",
+		"foundation_receipt",
 	} {
 		if !found[want] {
 			t.Errorf("tool %s is missing", want)
@@ -321,6 +322,91 @@ func TestScaffoldWritesACompleteProject(t *testing.T) {
 	}
 	if !again.IsError {
 		t.Fatal("scaffolding over an existing project must fail")
+	}
+}
+
+// TestVerificationReceiptBindsToTheCode is the point of the receipt: an
+// assistant cannot verify once and then keep editing while quoting the same
+// proof. The receipt is bound to the content it ran on, and the tools say so.
+func TestVerificationReceiptBindsToTheCode(t *testing.T) {
+	session := connect(t)
+	project := filepath.Join("..", "..", "examples", "quickstart")
+
+	before := callTool(t, session, "foundation_receipt", map[string]any{"directory": project})
+	if before["state"] != stateNone {
+		t.Fatalf("state before any verification = %v", before["state"])
+	}
+
+	verified := callTool(t, session, "foundation_verify", map[string]any{"directory": project})
+	if passed, _ := verified["passed"].(bool); !passed {
+		t.Fatalf("the quickstart should verify: %v", verified["steps"])
+	}
+	receipt, _ := verified["receipt"].(string)
+	if !strings.HasPrefix(receipt, receiptPrefix+":") {
+		t.Fatalf("receipt = %q", receipt)
+	}
+
+	current := callTool(t, session, "foundation_receipt", map[string]any{
+		"directory": project,
+		"receipt":   receipt,
+	})
+	if valid, _ := current["valid"].(bool); !valid {
+		t.Fatalf("the receipt should be current: %v", current)
+	}
+
+	// Editing the workspace must void it, without any further tool call.
+	scratch := filepath.Join(project, "zz_receipt_probe.go")
+	if err := os.WriteFile(scratch, []byte("package quickstart\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(scratch)
+
+	stale := callTool(t, session, "foundation_receipt", map[string]any{
+		"directory": project,
+		"receipt":   receipt,
+	})
+	if valid, _ := stale["valid"].(bool); valid {
+		t.Fatal("a receipt survived an edit, so it proves nothing")
+	}
+	if stale["state"] != stateStale {
+		t.Fatalf("state after an edit = %v", stale["state"])
+	}
+}
+
+func TestUnverifiedWorkIsReportedAsSuch(t *testing.T) {
+	session := connect(t)
+	target := filepath.Join(t.TempDir(), "service")
+
+	out := callTool(t, session, "foundation_scaffold", map[string]any{
+		"directory": target,
+		"module":    "example.com/service",
+	})
+	verification, _ := out["verification"].(map[string]any)
+	if verification == nil {
+		t.Fatal("scaffolding did not report a verification standing")
+	}
+	if verification["state"] != stateNone {
+		t.Fatalf("state after scaffolding = %v", verification["state"])
+	}
+	guidance, _ := verification["guidance"].(string)
+	if !strings.Contains(guidance, "foundation_verify") {
+		t.Fatalf("guidance = %q, it must point at the gate", guidance)
+	}
+
+	standing := callTool(t, session, "foundation_receipt", map[string]any{"directory": target})
+	if valid, _ := standing["valid"].(bool); valid {
+		t.Fatal("a freshly scaffolded project reported itself as verified")
+	}
+}
+
+func TestForgedReceiptIsRejected(t *testing.T) {
+	session := connect(t)
+	out := callTool(t, session, "foundation_receipt", map[string]any{
+		"directory": filepath.Join("..", "..", "examples", "quickstart"),
+		"receipt":   "fv1:0000000000000000",
+	})
+	if valid, _ := out["valid"].(bool); valid {
+		t.Fatal("an invented receipt was accepted")
 	}
 }
 
