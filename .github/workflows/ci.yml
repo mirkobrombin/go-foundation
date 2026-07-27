@@ -134,6 +134,12 @@ jobs:
         working-directory: dev
         run: go vet ./...
 
+      # The MCP server answers from a catalog extracted from the runtime module.
+      # This is what stops those answers from drifting away from the code.
+      - name: Check the API catalog and embedded documents
+        working-directory: dev
+        run: ../dist/foundation-linux-amd64 catalog -check
+
       - name: Test VS Code integration
         working-directory: editors/vscode
         run: |
