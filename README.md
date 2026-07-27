@@ -9,28 +9,27 @@
   </p>
 </div>
 
-Foundation v2 keeps Go as the language and moves framework knowledge into tools
-that can report errors while code is being written. Contracts are visible to the
-compiler, route and action registries are generated, dependency wiring is checked,
-and the VS Code extension connects Foundation metadata to editor navigation.
+Foundation is the plumbing an application needs before it is an application:
+dependency injection, HTTP, actions, scheduling, configuration, caching,
+logging, resiliency. What v2 changes is *when* a mistake surfaces.
+
+An application built this way says things the Go compiler cannot check. A
+contract is a type parameter, a route is a struct tag, an injected dependency is
+a name in a string. In v1 those relationships were resolved by reflection while
+the program ran, so a wrong one became a failed request. In v2 an analyzer reads
+them while the file is open, a generator turns them into compile-time assertions
+and static registries, and the editor navigates them like ordinary symbols.
 
 ## Install
 
-Until the first v2 release is tagged, install the CLI from a source checkout:
-
 ```sh
-(cd dev && go install ./cmd/foundation)
+go get github.com/mirkobrombin/go-foundation/v2@latest
+go install github.com/mirkobrombin/go-foundation/dev/v2/cmd/foundation@latest
 ```
 
-After `v2.0.0` and `dev/v2.0.0` are published:
-
-```sh
-go get github.com/mirkobrombin/go-foundation/v2@v2.0.0
-go install github.com/mirkobrombin/go-foundation/dev/v2/cmd/foundation@v2.0.0
-```
-
-The runtime module has no third-party dependencies. Development tools live in a
-separate module and use the official Go analysis packages.
+The runtime module has no third-party dependencies. The analyzer, the generator,
+and the CLI live in a separate module, so an application that imports Foundation
+never pulls the analysis packages into its own build.
 
 ## Static workflow
 
@@ -67,10 +66,16 @@ foundation check ./...
 go test ./...
 ```
 
-The generated file contains compile-time contract assertions and static
-constructors for HTTP handlers and actions. Runtime reflection remains available
-through `RegisterHTTP` and `RegisterActionHandler` for migration, but generated
-registration is the v2 default.
+Generation writes one `zz_foundation.gen.go` per package that declares
+something, holding the contract assertions and the static constructors, and
+removes the file again when the declarations are gone. Commit it: that is what
+makes a broken contract a compile error on a machine that has never installed
+the CLI.
+
+Generation is a choice, not a toll. `RegisterHTTP` and `RegisterActionHandler`
+still register by reflection, and `foundation check` reports the same problems
+either way, so a v1 application can move to v2 without a single generated file
+in its tree.
 
 See the [quickstart example](examples/quickstart/quickstart.go), exercised by its
 own test.

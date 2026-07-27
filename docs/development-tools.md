@@ -6,16 +6,18 @@ the analyzer, generator, and CLI.
 
 ## CLI
 
-Until the first v2 release is tagged, install from a source checkout:
+Install the CLI:
+
+```sh
+go install github.com/mirkobrombin/go-foundation/dev/v2/cmd/foundation@latest
+```
+
+The tools module carries its own tags, `dev/vX.Y.Z`, so `@latest` resolves
+against them and not against the runtime module. To run an unreleased change,
+install from a checkout instead:
 
 ```sh
 (cd dev && go install ./cmd/foundation)
-```
-
-After the `dev/v2.0.0` tag is published:
-
-```sh
-go install github.com/mirkobrombin/go-foundation/dev/v2/cmd/foundation@v2.0.0
 ```
 
 Check packages:
