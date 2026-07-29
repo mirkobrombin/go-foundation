@@ -16,7 +16,7 @@ concurrency:
 env:
   GO_VERSION: "1.25.12"
   GOVULNCHECK_VERSION: "v1.6.0"
-  EUPROVGUARD_VERSION: "v1.0.1"
+  EUPROVGUARD_VERSION: "v1.1.0"
   PALLAS_VERSION: "v2.0.3"
   VSCE_VERSION: "3.9.2"
 
@@ -171,7 +171,7 @@ jobs:
           cache: false
 
       - name: Install EUProvGuard
-        run: go install github.com/mirkobrombin/euprovguard@${{ env.EUPROVGUARD_VERSION }}
+        run: go install github.com/fabricatorsltd/euprovguard@${{ env.EUPROVGUARD_VERSION }}
 
       - name: Resolve project version
         id: version
