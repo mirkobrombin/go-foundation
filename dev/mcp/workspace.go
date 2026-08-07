@@ -77,7 +77,7 @@ func RunCheck(ctx context.Context, dir string, patterns []string) (*CheckResult,
 	cfg := &packages.Config{
 		Context: ctx,
 		Dir:     resolved,
-		Mode:    packages.LoadAllSyntax,
+		Mode:    packages.LoadSyntax,
 		Tests:   false,
 	}
 	loaded, err := packages.Load(cfg, patterns...)

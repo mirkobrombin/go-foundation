@@ -62,6 +62,7 @@ configuration.
 | `foundation_verify` | Build, analyse, check registries, vet, test. The gate before reporting work as done. |
 | `foundation_migrate` | Where a v1 package went, and the behaviour changes an import rewrite misses. |
 | `foundation_receipt` | Whether a verification receipt still matches the code as it stands. |
+| `foundation_audit` | Dependencies and code scanned for known vulnerabilities, with the gaps in the scan reported as such. |
 
 ## Verification receipts
 

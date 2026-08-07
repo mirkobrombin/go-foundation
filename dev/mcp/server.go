@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mirkobrombin/go-foundation/dev/v2/audit"
 	"github.com/mirkobrombin/go-foundation/dev/v2/catalog"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -422,12 +423,22 @@ type receiptInput struct {
 type verifyInput struct {
 	Directory string `json:"directory,omitempty" jsonschema:"module directory, defaults to the server workspace"`
 	Race      bool   `json:"race,omitempty" jsonschema:"run the tests under the race detector"`
+	Audit     bool   `json:"audit,omitempty" jsonschema:"also run the supply chain scan; needs the network and takes longer"`
 }
 
 type scaffoldInput struct {
 	Directory  string `json:"directory" jsonschema:"target directory, created if missing"`
 	Module     string `json:"module" jsonschema:"Go module path, for example example.com/service"`
 	WithServer bool   `json:"with_server,omitempty" jsonschema:"generate a main that listens instead of only building"`
+}
+
+type auditInput struct {
+	Directory    string `json:"directory,omitempty" jsonschema:"project directory, defaults to the server workspace"`
+	Name         string `json:"name,omitempty" jsonschema:"project name recorded in the SBOM"`
+	Version      string `json:"version,omitempty" jsonschema:"project version recorded in the SBOM"`
+	Offline      bool   `json:"offline,omitempty" jsonschema:"skip every network step; the result is always reported as incomplete"`
+	SkipCodeScan bool   `json:"skip_code_scan,omitempty" jsonschema:"skip the static analysis pass over the source"`
+	SBOMPath     string `json:"sbom_path,omitempty" jsonschema:"write the CycloneDX document to this path"`
 }
 
 type migrateInput struct {
@@ -502,6 +513,23 @@ func registerWorkspaceTools(server *mcpsdk.Server, workspace string, state *sess
 		if err != nil {
 			return nil, VerifyResult{}, err
 		}
+		if in.Audit {
+			scan, auditErr := audit.Run(ctx, audit.Options{Directory: result.Directory})
+			step := Step{Name: "supply chain audit", Command: "foundation audit"}
+			switch {
+			case auditErr != nil:
+				step.Output = auditErr.Error()
+			default:
+				step.Passed = scan.Passed
+				step.Output = scan.Summary
+			}
+			result.Steps = append(result.Steps, step)
+			if !step.Passed {
+				result.Passed = false
+				result.NextActions = append(result.NextActions,
+					"Call foundation_audit for the findings, and treat an incomplete scan as unresolved rather than clean.")
+			}
+		}
 		if result.Passed {
 			if fingerprint, err := Fingerprint(result.Directory); err == nil {
 				result.Receipt = state.recordVerification(result.Directory, fingerprint)
@@ -562,6 +590,29 @@ func registerWorkspaceTools(server *mcpsdk.Server, workspace string, state *sess
 		state.clearVerification(result.Directory)
 		status := state.status(result.Directory)
 		result.Verification = &status
+		return nil, *result, nil
+	})
+
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:  "foundation_audit",
+		Title: "Scan dependencies and code for known vulnerabilities",
+		Description: "Runs the supply chain scan in process: reads every dependency manifest, matches them " +
+			"against the live vulnerability databases, and scans the source for risky patterns. " +
+			"Read the result with care: passed is false both when something was found and when the scan " +
+			"could not complete, because an empty finding list from a scan that never reached the databases " +
+			"is not an all clear. The reasons live in degraded.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in auditInput) (*mcpsdk.CallToolResult, audit.Result, error) {
+		result, err := audit.Run(ctx, audit.Options{
+			Directory: orDefault(in.Directory, workspace),
+			Name:      in.Name,
+			Version:   in.Version,
+			Offline:   in.Offline,
+			SkipSAST:  in.SkipCodeScan,
+			SBOMPath:  in.SBOMPath,
+		})
+		if err != nil {
+			return nil, audit.Result{}, err
+		}
 		return nil, *result, nil
 	})
 

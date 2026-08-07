@@ -94,6 +94,7 @@ func TestServerExposesEveryTool(t *testing.T) {
 		"foundation_scaffold",
 		"foundation_migrate",
 		"foundation_receipt",
+		"foundation_audit",
 	} {
 		if !found[want] {
 			t.Errorf("tool %s is missing", want)
@@ -284,6 +285,16 @@ func TestCheckRunsTheRealAnalyzer(t *testing.T) {
 	}
 }
 
+func TestCheckRunsOnFoundationRuntime(t *testing.T) {
+	result, err := RunCheck(context.Background(), filepath.Join("..", ".."), []string{"./core/bind"})
+	if err != nil {
+		t.Fatalf("RunCheck() error = %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("core/bind should be clean: %v", result.Diagnostics)
+	}
+}
+
 func TestScaffoldWritesACompleteProject(t *testing.T) {
 	session := connect(t)
 	target := filepath.Join(t.TempDir(), "service")
@@ -407,6 +418,40 @@ func TestForgedReceiptIsRejected(t *testing.T) {
 	})
 	if valid, _ := out["valid"].(bool); valid {
 		t.Fatal("an invented receipt was accepted")
+	}
+}
+
+// TestAuditRefusesToCallAnIncompleteScanClean covers the trap of a supply chain
+// tool: with no network it finds nothing, and "nothing found" would read as
+// "nothing wrong" to whatever is reading the result.
+func TestAuditRefusesToCallAnIncompleteScanClean(t *testing.T) {
+	session := connect(t)
+
+	project := t.TempDir()
+	manifest := "module example.com/audited\n\ngo 1.25\n\nrequire golang.org/x/sys v0.41.0\n"
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := callTool(t, session, "foundation_audit", map[string]any{
+		"directory":      project,
+		"offline":        true,
+		"skip_code_scan": true,
+	})
+
+	if dependencies, _ := out["dependencies"].(float64); dependencies != 1 {
+		t.Fatalf("dependencies = %v, want 1", out["dependencies"])
+	}
+	if passed, _ := out["passed"].(bool); passed {
+		t.Fatal("an offline scan reported itself as passed")
+	}
+	degraded, _ := out["degraded"].([]any)
+	if len(degraded) == 0 {
+		t.Fatal("the reason the scan is incomplete was not reported")
+	}
+	summary, _ := out["summary"].(string)
+	if !strings.Contains(summary, "not an all clear") {
+		t.Fatalf("summary = %q", summary)
 	}
 }
 

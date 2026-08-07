@@ -38,8 +38,33 @@ Verify that committed generated files match the source:
 foundation generate -check ./...
 ```
 
+Scan dependencies and source for known vulnerabilities:
+
+```sh
+foundation audit
+foundation audit -sbom sbom.json -json
+```
+
 Generation writes `zz_foundation.gen.go` atomically and formats it with the Go
 formatter. Output is sorted by package path and source declaration order.
+
+## Supply chain audit
+
+`foundation audit` reads every dependency manifest it recognises, matches the
+dependencies against the live vulnerability databases, and scans the source for
+risky patterns. The scanner is EUProvGuard, imported as a library: there is no
+binary to find on PATH, nothing to keep in step with a separate release, and no
+output to parse back into structure.
+
+It exits non-zero when it finds something, and also when it could not finish.
+Vulnerability matching needs the network, and a scan that could not reach the
+databases reports zero findings for a reason that is not "nothing is wrong".
+Those cases are listed as incomplete, and `-offline` always reports as such.
+
+It is a separate command from `foundation check` on purpose. The analyzer is
+static, local, and fast enough to run on every save. The audit reads the network
+and walks the whole tree. Behind one command, the fast check would become slow
+and the offline one would start needing the network.
 
 ## Analyzer scope
 

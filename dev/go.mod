@@ -3,6 +3,7 @@ module github.com/mirkobrombin/go-foundation/dev/v2
 go 1.25.0
 
 require (
+	github.com/fabricatorsltd/euprovguard v1.2.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	golang.org/x/tools v0.42.0
 )
