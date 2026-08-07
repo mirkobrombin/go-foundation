@@ -11,7 +11,7 @@ import (
 )
 
 // Version is the server version reported during the protocol handshake.
-const Version = "2.1.0"
+const Version = "2.2.0"
 
 // instructions reach every connected client during initialisation. They are the
 // contract of use: a model that reads them knows what it must not improvise.
