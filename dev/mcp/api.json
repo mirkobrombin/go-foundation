@@ -2102,6 +2102,11 @@
               "doc": "Bind populates a struct from the configuration data. Fields are matched using the `conf` tag. If no tag is present, the field name is used as key. Example: type Config struct { Host string `conf:\"db:host\"` Port int `conf:\"db:port\" default:\"5432\"` } var cfg Config err := configuration.Bind(\u0026cfg)"
             },
             {
+              "name": "CollectionKeys",
+              "signature": "func (c *Configuration) CollectionKeys(prefix string) []string",
+              "doc": "CollectionKeys returns the sorted names of the first-level child sections under prefix. With an empty prefix it returns the top-level key segments. Keys are stored lowercased, so returned names are lowercase regardless of the original file or key casing."
+            },
+            {
               "name": "Get",
               "signature": "func (c *Configuration) Get(key string) (any, bool)",
               "doc": "Get returns the value for the given key. The key is case-insensitive. Nested keys can be accessed with colon syntax, e.g. \"db:host\". Returns: The value and true if found, otherwise nil and false."
@@ -2135,9 +2140,81 @@
         },
         {
           "kind": "type",
+          "name": "CrossValidator",
+          "signature": "type CrossValidator[T any] func(items map[string]*T) []string",
+          "doc": "CrossValidator reports problems that only exist across entries, such as duplicate ports or overlapping domains. The returned slice holds human-readable problem descriptions; empty means valid."
+        },
+        {
+          "kind": "type",
+          "name": "ItemValidator",
+          "signature": "type ItemValidator[T any] func(name string, item *T) []string",
+          "doc": "ItemValidator reports problems with a single bound entry. The returned slice holds human-readable problem descriptions; empty means valid."
+        },
+        {
+          "kind": "type",
           "name": "Provider",
           "signature": "type Provider interface { // Name returns a human-readable identifier for this source. Name() string // Load retrieves configuration key-value pairs. Load(ctx context.Context) (map[string]any, error) }",
           "doc": "Provider is the interface that configuration sources must implement. Example: type MyProvider struct{} func (p *MyProvider) Name() string { return \"my\" } func (p *MyProvider) Load(ctx) (map[string]any, error) { return map[string]any{\"key\": \"val\"}, nil }"
+        },
+        {
+          "kind": "func",
+          "name": "BindCollection",
+          "signature": "func BindCollection[T any](c *Configuration, prefix string) (map[string]*T, error)",
+          "doc": "BindCollection binds every first-level child section of prefix into a T, keyed by section name. It is the typed counterpart of loading a directory of files with source/dir: each file becomes one entry in the returned map. Example: cfg := configuration.NewBuilder().Add(dir.New(\"tenants\", \"*.json\")).Build(ctx) tenants, err := configuration.BindCollection[TenantConfig](cfg, \"\") // tenants[\"acme\"].Quota, tenants[\"globex\"].Quota, ... With a non-empty prefix the collection is read one level below it: BindCollection[T](cfg, \"tenants\") binds \"tenants:\u003cname\u003e:*\" into entries keyed by \u003cname\u003e."
+        },
+        {
+          "kind": "func",
+          "name": "ValidateCollection",
+          "signature": "func ValidateCollection[T any](items map[string]*T, item ItemValidator[T], cross ...CrossValidator[T]) []string",
+          "doc": "ValidateCollection runs the item validator on every entry (in sorted name order) and then every cross validator on the whole collection, aggregating all problems. Entry problems are prefixed with the entry name. Returning every problem at once matters for the \"validate my config directory\" workflow: fixing one file at a time is the slow path."
+        }
+      ]
+    },
+    {
+      "path": "github.com/mirkobrombin/go-foundation/v2/core/configuration/source/dir",
+      "name": "dir",
+      "layer": "core",
+      "doc": "Package dir implements configuration.Provider for directories of JSON files. Where source/file loads a single JSON document, dir loads every matching file in a directory and nests each document under the file name (without extension). This supports the \"one configuration file per entity\" model (one file per tenant, environment, instance) that a single document cannot express. Example: p := dir.New(\"tenants\", \"*.json\") // tenants/acme.json -\u003e keys \"acme:quota\", \"acme:region\", ...",
+      "symbols": [
+        {
+          "kind": "type",
+          "name": "Provider",
+          "signature": "type Provider struct { // Dir is the directory to scan. Dir string // Pattern is a glob matched against file names (e.g. \"*.json\"). // Matching follows filepath.Match semantics. Pattern string // Exclude lists file names to skip (e.g. a global config living in the // same directory). Exact match on the base name. Exclude []string }",
+          "doc": "Provider implements configuration.Provider for a directory of JSON files.",
+          "fields": [
+            {
+              "name": "Dir",
+              "type": "string",
+              "doc": "Dir is the directory to scan."
+            },
+            {
+              "name": "Pattern",
+              "type": "string",
+              "doc": "Pattern is a glob matched against file names (e.g. \"*.json\"). Matching follows filepath.Match semantics."
+            },
+            {
+              "name": "Exclude",
+              "type": "[]string",
+              "doc": "Exclude lists file names to skip (e.g. a global config living in the same directory). Exact match on the base name."
+            }
+          ],
+          "methods": [
+            {
+              "name": "Load",
+              "signature": "func (p *Provider) Load(ctx context.Context) (map[string]any, error)",
+              "doc": "Load reads every matching file in the directory and returns a flat key-value map. Each file's content is flattened with colon-separated keys prefixed by the file base name without extension: \"tenants/acme.json\" -\u003e \"acme:quota\". Files are processed in sorted name order so the result is deterministic."
+            },
+            {
+              "name": "Name",
+              "signature": "func (p *Provider) Name() string",
+              "doc": "Name returns \"dir\"."
+            },
+            {
+              "name": "New",
+              "signature": "func New(dir, pattern string, exclude ...string) *Provider",
+              "doc": "New creates a new directory provider. pattern is a glob like \"*.json\"."
+            }
+          ]
         }
       ]
     },
@@ -3227,6 +3304,34 @@
       "symbols": [
         {
           "kind": "type",
+          "name": "CertResolver",
+          "signature": "type CertResolver struct { // contains filtered or unexported fields }",
+          "doc": "CertResolver maps host names to TLS key pairs, providing SNI-based certificate selection for a listener that terminates TLS for many host names.",
+          "methods": [
+            {
+              "name": "Add",
+              "signature": "func (r *CertResolver) Add(host, certFile, keyFile string) error",
+              "doc": "Add loads a certificate and key from disk and registers them for host. Host is normalized the same way as VHostMux hosts."
+            },
+            {
+              "name": "GetCertificate",
+              "signature": "func (r *CertResolver) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error)",
+              "doc": "GetCertificate implements the tls.Config.GetCertificate callback: it returns the certificate registered for the SNI server name, or nil (which fails the handshake) when no host name matches."
+            },
+            {
+              "name": "NewCertResolver",
+              "signature": "func NewCertResolver() *CertResolver",
+              "doc": "NewCertResolver creates an empty resolver."
+            },
+            {
+              "name": "Remove",
+              "signature": "func (r *CertResolver) Remove(host string) bool",
+              "doc": "Remove drops the certificate for host, returning whether one existed."
+            }
+          ]
+        },
+        {
+          "kind": "type",
           "name": "Client",
           "signature": "type Client struct { // contains filtered or unexported fields }",
           "doc": "Client is an extensible HTTP client with middleware and optional resiliency hooks.",
@@ -3255,6 +3360,12 @@
         },
         {
           "kind": "type",
+          "name": "Hooks",
+          "signature": "type Hooks interface { // BeforeRequest is invoked before serving each request. BeforeRequest(r *http.Request) // HandleRequest can fully handle the request, returning true if it does so. HandleRequest(w http.ResponseWriter, r *http.Request) (handled bool) // AfterRequest is invoked after the request has been served or handled. AfterRequest(w http.ResponseWriter, r *http.Request) }",
+          "doc": "Hooks is the request lifecycle extension contract. Example: type Auth struct{ ... } func (a Auth) BeforeRequest(r *http.Request) { ... } func (a Auth) HandleRequest(w, r) bool { ... } func (a Auth) AfterRequest(w, r) { ... }"
+        },
+        {
+          "kind": "type",
           "name": "Middleware",
           "signature": "type Middleware func(next http.RoundTripper) http.RoundTripper",
           "doc": "Middleware wraps an http.RoundTripper.",
@@ -3273,6 +3384,75 @@
               "name": "RequestID",
               "signature": "func RequestID(header string) Middleware",
               "doc": "RequestID returns a Middleware that injects a unique request ID into the given header if absent."
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "Option",
+          "signature": "type Option = options.Option[VHostMux]",
+          "doc": "Option configures a VHostMux.",
+          "methods": [
+            {
+              "name": "WithFallback",
+              "signature": "func WithFallback(h http.Handler) Option",
+              "doc": "WithFallback sets the handler used when no virtual host matches the request host. Without a fallback, unmatched hosts get 404."
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "VHostMux",
+          "signature": "type VHostMux struct { // contains filtered or unexported fields }",
+          "doc": "VHostMux dispatches requests to virtual hosts by Host header. It is the counterpart of a path router for the multi-tenant shape: instead of path-based routes for one application, it routes host names to independent handlers in one process.",
+          "methods": [
+            {
+              "name": "AddVirtualHost",
+              "signature": "func (m *VHostMux) AddVirtualHost(vh VirtualHost)",
+              "doc": "AddVirtualHost registers a virtual host. Registering the same host twice replaces the previous one. Host is normalized (lowercased, port stripped)."
+            },
+            {
+              "name": "Hosts",
+              "signature": "func (m *VHostMux) Hosts() []string",
+              "doc": "Hosts returns the sorted list of registered host names."
+            },
+            {
+              "name": "NewVHostMux",
+              "signature": "func NewVHostMux(opts ...Option) *VHostMux",
+              "doc": "NewVHostMux creates an empty mux."
+            },
+            {
+              "name": "RemoveVirtualHost",
+              "signature": "func (m *VHostMux) RemoveVirtualHost(host string) bool",
+              "doc": "RemoveVirtualHost unregisters the virtual host for host, returning whether one existed."
+            },
+            {
+              "name": "ServeHTTP",
+              "signature": "func (m *VHostMux) ServeHTTP(w http.ResponseWriter, r *http.Request)",
+              "doc": "ServeHTTP implements http.Handler."
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "VirtualHost",
+          "signature": "type VirtualHost struct { // Host is the host name this virtual host answers, without port. Host string // Handler serves requests the hooks did not handle. Handler http.Handler // Hooks run around Handler in registration order for BeforeRequest and // HandleRequest, and in reverse order for AfterRequest (like a stack). Hooks []Hooks }",
+          "doc": "VirtualHost binds one host name to a handler and its lifecycle hooks. Host matching is case-insensitive and ignores the request port: a virtual host registered as \"example.com\" answers \"example.com\", \"EXAMPLE.com\" and \"example.com:8443\".",
+          "fields": [
+            {
+              "name": "Host",
+              "type": "string",
+              "doc": "Host is the host name this virtual host answers, without port."
+            },
+            {
+              "name": "Handler",
+              "type": "http.Handler",
+              "doc": "Handler serves requests the hooks did not handle."
+            },
+            {
+              "name": "Hooks",
+              "type": "[]Hooks",
+              "doc": "Hooks run around Handler in registration order for BeforeRequest and HandleRequest, and in reverse order for AfterRequest (like a stack)."
             }
           ]
         }
