@@ -7,11 +7,15 @@ import (
 
 	"github.com/mirkobrombin/go-foundation/dev/v2/audit"
 	"github.com/mirkobrombin/go-foundation/dev/v2/catalog"
+	"github.com/mirkobrombin/go-foundation/dev/v2/version"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Version is the server version reported during the protocol handshake.
-const Version = "2.2.0"
+// Version is reported during the protocol handshake. It is read from the build
+// rather than declared here: a constant is accurate until the release someone
+// forgets to bump, and a server that misreports its own version undermines
+// every answer it gives about which version it speaks for.
+var Version = version.Current()
 
 // instructions reach every connected client during initialisation. They are the
 // contract of use: a model that reads them knows what it must not improvise.

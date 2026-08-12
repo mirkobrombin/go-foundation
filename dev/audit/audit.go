@@ -25,10 +25,13 @@ import (
 
 	"github.com/fabricatorsltd/euprovguard/pkg/engine"
 	"github.com/fabricatorsltd/euprovguard/pkg/sbom"
+	"github.com/mirkobrombin/go-foundation/dev/v2/version"
 )
 
-// ToolVersion identifies Foundation in the generated SBOM metadata.
-const ToolVersion = "foundation"
+// ToolVersion identifies Foundation, and which build of it, in the SBOM.
+func ToolVersion() string {
+	return "foundation " + version.Current()
+}
 
 // Options configures an audit.
 type Options struct {
@@ -108,7 +111,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		Path:           root,
 		ProjectName:    opts.Name,
 		ProjectVersion: opts.Version,
-		ToolVersion:    ToolVersion,
+		ToolVersion:    ToolVersion(),
 		Offline:        opts.Offline,
 		DisableSAST:    opts.SkipSAST,
 	})

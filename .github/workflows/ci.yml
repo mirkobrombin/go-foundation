@@ -48,12 +48,19 @@ jobs:
         working-directory: dev
         run: go build ./...
 
+      # A binary built from a checkout has no module version to read, so the tag
+      # is stamped in. Without it a release binary cannot name itself, which is
+      # how the tools drifted behind the releases before.
       - name: Build Foundation CLI
         working-directory: dev
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ../dist
+          stamp=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            stamp="-X github.com/mirkobrombin/go-foundation/dev/v2/version.stamped=${GITHUB_REF_NAME}"
+          fi
           for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             os="${platform%/*}"
             arch="${platform#*/}"
@@ -62,8 +69,21 @@ jobs:
               ext=".exe"
             fi
             CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" \
-              go build -trimpath -o "../dist/foundation-${os}-${arch}${ext}" ./cmd/foundation
+              go build -trimpath -ldflags "${stamp}" -o "../dist/foundation-${os}-${arch}${ext}" ./cmd/foundation
           done
+
+      - name: Check the binary reports the tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          reported=$(./dist/foundation-linux-amd64 version)
+          expected="foundation ${GITHUB_REF_NAME}"
+          if [ "${reported}" != "${expected}" ]; then
+            echo "::error::the binary reports \"${reported}\", the tag is \"${expected}\""
+            exit 1
+          fi
+          echo "${reported}"
 
       - name: Upload Foundation CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -342,6 +362,26 @@ jobs:
               --generate-notes \
               --verify-tag
           fi
+
+      # The tools live in a nested module, tagged dev/vX.Y.Z. Releasing the
+      # runtime without that tag leaves go install serving an older CLI and MCP
+      # server, silently: this creates it with the release.
+      - name: Publish the tools module tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="dev/${GITHUB_REF_NAME}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "${tag} already exists."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f "ref=refs/tags/${tag}" \
+            -f "sha=${GITHUB_SHA}" >/dev/null
+          echo "created ${tag}"
 
       - name: Upload release assets
         env:

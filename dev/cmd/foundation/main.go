@@ -11,6 +11,7 @@ import (
 	"github.com/mirkobrombin/go-foundation/dev/v2/catalog"
 	"github.com/mirkobrombin/go-foundation/dev/v2/generator"
 	"github.com/mirkobrombin/go-foundation/dev/v2/mcp"
+	"github.com/mirkobrombin/go-foundation/dev/v2/version"
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
 
@@ -33,7 +34,7 @@ func main() {
 	case "mcp":
 		serveMCP(os.Args[2:])
 	case "version":
-		fmt.Println("foundation dev v2")
+		fmt.Printf("foundation %s\n", version.Current())
 	default:
 		usage()
 		os.Exit(2)
@@ -48,7 +49,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  audit     scan dependencies and code for known vulnerabilities")
 	fmt.Fprintln(os.Stderr, "  mcp       serve the Model Context Protocol server on stdio")
 	fmt.Fprintln(os.Stderr, "  catalog   regenerate the embedded API catalog (-check to verify)")
-	fmt.Fprintln(os.Stderr, "  version   print the tool version")
+	fmt.Fprintln(os.Stderr, "  version   print the version of the tools module this binary was built from")
 }
 
 func generate(args []string) {
