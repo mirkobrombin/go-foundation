@@ -4,7 +4,7 @@
   <p>A Go application foundation with development-time checks.</p>
   <p>
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go 1.25+">
-    <img src="https://img.shields.io/badge/runtime_deps-none-success" alt="Zero runtime dependencies">
+    <img src="https://img.shields.io/badge/runtime_deps-wazero-success" alt="wazero runtime dependency">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   </p>
 </div>
@@ -27,9 +27,10 @@ go get github.com/mirkobrombin/go-foundation/v2@latest
 go install github.com/mirkobrombin/go-foundation/dev/v2/cmd/foundation@latest
 ```
 
-The runtime module has no third-party dependencies. The analyzer, the generator,
-and the CLI live in a separate module, so an application that imports Foundation
-never pulls the analysis packages into its own build.
+The runtime uses wazero for isolated WebAssembly plugins. It is pure Go and does
+not require CGO. The analyzer, the generator, and the CLI live in a separate
+module, so an application that imports Foundation never pulls the analysis
+packages into its own build.
 
 ## Static workflow
 
@@ -173,11 +174,42 @@ result, err := actions.DispatchTyped(ctx, router, create, payload)
 Use strings where they are part of external metadata. Use typed APIs inside Go
 code when the compiler can carry the relationship.
 
+## Plugins
+
+Foundation supports three plugin boundaries. Go shared objects load existing
+Go plugins that were built with the same toolchain and dependency graph.
+`ExecSandbox` keeps a plugin in a separate process with a JSON protocol.
+WebAssembly plugins use a stable Foundation ABI, run in-process through wazero,
+and can be written in any language that produces a core Wasm module.
+
+```go
+module, err := plugin.LoadWasmFile(ctx, "report.wasm",
+    plugin.WithWasmCapability("reports.store", storeCapability),
+    plugin.WithWasmMemoryLimit(32<<20),
+)
+if err != nil {
+    return err
+}
+defer module.Close(ctx)
+
+if err := module.StartContext(ctx); err != nil {
+    return err
+}
+result, err := module.Call(ctx, "render", request)
+```
+
+A module inherits no filesystem, process environment, clock, stream, or network
+access. Host functions are exposed as named capabilities and a plugin must both
+declare and receive each one before it can load. WASI Preview 1 is available as
+an explicit option for code that needs it. See [WebAssembly plugins](docs/plugins.md)
+for the ABI, language contract, discovery, limits, and WASI configuration.
+
 ## Documentation
 
 - [Project shape](docs/foundation-project.md)
 - [Development tools](docs/development-tools.md)
 - [MCP server](docs/mcp.md)
+- [WebAssembly plugins](docs/plugins.md)
 - [V2 migration](docs/v2-migration.md)
 - [Foundation Doctor](docs/foundation-doctor.md)
 - [go-module-router migration](docs/go-module-router-migration.md)

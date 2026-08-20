@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -85,6 +86,7 @@ func TestServerExposesEveryTool(t *testing.T) {
 		"foundation_packages",
 		"foundation_package_api",
 		"foundation_symbol",
+		"foundation_plugin_abi",
 		"foundation_declaration_rules",
 		"foundation_checks",
 		"foundation_install",
@@ -99,6 +101,22 @@ func TestServerExposesEveryTool(t *testing.T) {
 		if !found[want] {
 			t.Errorf("tool %s is missing", want)
 		}
+	}
+}
+
+func TestPluginABIAnswersFromCatalogAndDocumentation(t *testing.T) {
+	session := connect(t)
+	out := callTool(t, session, "foundation_plugin_abi", nil)
+	if out["abi"] != "foundation:plugin@1.0" {
+		t.Fatalf("abi = %v", out["abi"])
+	}
+	contract, _ := out["contract"].(string)
+	if !strings.Contains(contract, "foundation_abi_version") {
+		t.Fatal("plugin contract does not describe the ABI exports")
+	}
+	encoded, _ := json.Marshal(out["package"])
+	if !bytes.Contains(encoded, []byte("LoadWasm")) {
+		t.Fatal("plugin package does not contain LoadWasm")
 	}
 }
 
@@ -465,7 +483,7 @@ func writeBrokenModule(t *testing.T, dir string) {
 	files := map[string]string{
 		"go.mod": `module example.com/broken
 
-go 1.25
+go 1.25.0
 
 require github.com/mirkobrombin/go-foundation/v2 v2.0.0
 

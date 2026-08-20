@@ -218,7 +218,7 @@ func sampleModule(t *testing.T, valid bool) string {
 	root := filepath.Clean(filepath.Join(filepath.Dir(current), "..", ".."))
 	goMod := fmt.Sprintf(`module example.com/sample
 
-go 1.25
+go 1.25.0
 
 require github.com/mirkobrombin/go-foundation/v2 v2.0.0
 

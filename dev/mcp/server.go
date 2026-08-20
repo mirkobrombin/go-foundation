@@ -166,7 +166,33 @@ type installOutput struct {
 	Verified []string `json:"verify_installation"`
 }
 
+type pluginABIOutput struct {
+	ABI      string          `json:"abi"`
+	Package  catalog.Package `json:"package"`
+	Contract string          `json:"contract"`
+}
+
 func registerKnowledgeTools(server *mcpsdk.Server) {
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:        "foundation_plugin_abi",
+		Title:       "Read the WebAssembly plugin contract",
+		Description: "Returns the current WebAssembly ABI documentation and the exported core/plugin API from this build.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ emptyInput) (*mcpsdk.CallToolResult, pluginABIOutput, error) {
+		api, err := PackageByPath("core/plugin")
+		if err != nil {
+			return nil, pluginABIOutput{}, err
+		}
+		contract, err := Document("plugins")
+		if err != nil {
+			return nil, pluginABIOutput{}, err
+		}
+		return nil, pluginABIOutput{
+			ABI:      "foundation:plugin@1.0",
+			Package:  *api,
+			Contract: contract,
+		}, nil
+	})
+
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:  "foundation_overview",
 		Title: "What Foundation is and how to work with it",
@@ -224,6 +250,7 @@ func registerKnowledgeTools(server *mcpsdk.Server) {
 			},
 			ToolsToUse: []string{
 				"foundation_packages, foundation_package_api, foundation_symbol: the API as it exists",
+				"foundation_plugin_abi: the WebAssembly plugin contract and current core/plugin API",
 				"foundation_declaration_rules: tags, routes, wiring, contracts, generation",
 				"foundation_checks: every diagnostic with its cause and fix",
 				"foundation_scaffold: a correct project to start from",
@@ -366,7 +393,7 @@ func registerKnowledgeTools(server *mcpsdk.Server) {
 }`,
 			Notes: []string{
 				"The tools module is tagged separately as dev/vX.Y.Z, so @latest resolves against those tags.",
-				"The runtime module has no third-party dependencies; the tools are a development dependency only.",
+				"The runtime uses the pure Go wazero module for isolated WebAssembly plugins.",
 				"The server speaks MCP over stdio and needs no network access.",
 				"Run the server from the workspace you are working on, or pass -workspace to point it elsewhere.",
 			},

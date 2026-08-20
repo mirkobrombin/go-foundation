@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"sync"
 )
 
@@ -135,6 +136,34 @@ func (r *Registry) StopAll() []error {
 			errs = append(errs, err)
 		} else {
 			delete(r.running, name)
+		}
+	}
+	return errs
+}
+
+// CloseAll stops plugins and closes context-aware resources in reverse insertion order.
+func (r *Registry) CloseAll(ctx context.Context) []error {
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+
+	names := r.Names()
+	var errs []error
+	for i := len(names) - 1; i >= 0; i-- {
+		name := names[i]
+		plugin, ok := r.Get(name)
+		if !ok {
+			continue
+		}
+		if r.running[name] {
+			if err := plugin.Stop(); err != nil {
+				errs = append(errs, err)
+			}
+			delete(r.running, name)
+		}
+		if closer, ok := plugin.(interface{ Close(context.Context) error }); ok {
+			if err := closer.Close(ctx); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	return errs

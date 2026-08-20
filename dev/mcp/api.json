@@ -1,6 +1,6 @@
 {
   "module": "github.com/mirkobrombin/go-foundation/v2",
-  "go": "1.25",
+  "go": "1.25.0",
   "packages": [
     {
       "path": "github.com/mirkobrombin/go-foundation/v2/app",
@@ -4105,8 +4105,23 @@
       "path": "github.com/mirkobrombin/go-foundation/v2/core/plugin",
       "name": "plugin",
       "layer": "core",
-      "doc": "Package plugin provides a focused plugin registry and supporting helpers.",
+      "doc": "Package plugin provides plugin lifecycle, discovery, and isolated execution.",
       "symbols": [
+        {
+          "kind": "const",
+          "name": "WasmABIMajor",
+          "signature": "const WasmABIMajor uint32"
+        },
+        {
+          "kind": "const",
+          "name": "WasmABIMinor",
+          "signature": "const WasmABIMinor uint32"
+        },
+        {
+          "kind": "const",
+          "name": "WasmABIName",
+          "signature": "const WasmABIName untyped string"
+        },
         {
           "kind": "var",
           "name": "ErrAlreadyRegistered",
@@ -4121,6 +4136,55 @@
           "kind": "var",
           "name": "ErrFactoryNotFound",
           "signature": "var ErrFactoryNotFound error"
+        },
+        {
+          "kind": "var",
+          "name": "ErrWasmABIMismatch",
+          "signature": "var ErrWasmABIMismatch error"
+        },
+        {
+          "kind": "var",
+          "name": "ErrWasmCallFailed",
+          "signature": "var ErrWasmCallFailed error"
+        },
+        {
+          "kind": "var",
+          "name": "ErrWasmCapabilityDenied",
+          "signature": "var ErrWasmCapabilityDenied error"
+        },
+        {
+          "kind": "var",
+          "name": "ErrWasmClosed",
+          "signature": "var ErrWasmClosed error"
+        },
+        {
+          "kind": "var",
+          "name": "ErrWasmInvalidModule",
+          "signature": "var ErrWasmInvalidModule error"
+        },
+        {
+          "kind": "var",
+          "name": "ErrWasmNotStarted",
+          "signature": "var ErrWasmNotStarted error"
+        },
+        {
+          "kind": "type",
+          "name": "Capability",
+          "signature": "type Capability interface { Call(context.Context, string, []byte) ([]byte, error) }",
+          "doc": "Capability handles one operation requested by a WebAssembly plugin."
+        },
+        {
+          "kind": "type",
+          "name": "CapabilityFunc",
+          "signature": "type CapabilityFunc func(context.Context, string, []byte) ([]byte, error)",
+          "doc": "CapabilityFunc adapts a function into a Capability.",
+          "methods": [
+            {
+              "name": "Call",
+              "signature": "func (function CapabilityFunc) Call(ctx context.Context, operation string, input []byte) ([]byte, error)",
+              "doc": "Call invokes the capability function."
+            }
+          ]
         },
         {
           "kind": "type",
@@ -4199,6 +4263,11 @@
           "doc": "Registry manages plugin registration and lifecycle in a deterministic order.",
           "methods": [
             {
+              "name": "CloseAll",
+              "signature": "func (r *Registry) CloseAll(ctx context.Context) []error",
+              "doc": "CloseAll stops plugins and closes context-aware resources in reverse insertion order."
+            },
+            {
               "name": "DiscoverFromValues",
               "signature": "func (r *Registry) DiscoverFromValues(values ...interface{}) int",
               "doc": "DiscoverFromValues inspects provided values and registers any that implement Plugin."
@@ -4224,6 +4293,11 @@
               "doc": "Register adds a plugin to the registry."
             },
             {
+              "name": "RegisterWasmDirectory",
+              "signature": "func (registry *Registry) RegisterWasmDirectory(ctx context.Context, directory string, options ...WasmOption) (int, error)",
+              "doc": "RegisterWasmDirectory loads and registers every .wasm plugin in a directory. The registry owns successfully registered modules and should close them with CloseAll."
+            },
+            {
               "name": "StartAll",
               "signature": "func (r *Registry) StartAll() []error",
               "doc": "StartAll starts plugins in insertion order and returns any collected errors."
@@ -4237,6 +4311,201 @@
               "name": "Unregister",
               "signature": "func (r *Registry) Unregister(name string)",
               "doc": "Unregister removes a plugin by name."
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "WasmHostStatus",
+          "signature": "type WasmHostStatus uint32",
+          "doc": "WasmHostStatus is returned to a guest after a host capability call."
+        },
+        {
+          "kind": "type",
+          "name": "WasmMetadata",
+          "signature": "type WasmMetadata struct { Name string `json:\"name\"` Version string `json:\"version\"` Description string `json:\"description,omitempty\"` Methods []string `json:\"methods,omitempty\"` Capabilities []string `json:\"capabilities,omitempty\"` Properties map[string]string `json:\"properties,omitempty\"` }",
+          "doc": "WasmMetadata describes a module before its lifecycle starts.",
+          "fields": [
+            {
+              "name": "Name",
+              "type": "string",
+              "tag": "json:\"name\""
+            },
+            {
+              "name": "Version",
+              "type": "string",
+              "tag": "json:\"version\""
+            },
+            {
+              "name": "Description",
+              "type": "string",
+              "tag": "json:\"description,omitempty\""
+            },
+            {
+              "name": "Methods",
+              "type": "[]string",
+              "tag": "json:\"methods,omitempty\""
+            },
+            {
+              "name": "Capabilities",
+              "type": "[]string",
+              "tag": "json:\"capabilities,omitempty\""
+            },
+            {
+              "name": "Properties",
+              "type": "map[string]string",
+              "tag": "json:\"properties,omitempty\""
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "WasmOption",
+          "signature": "type WasmOption func(*wasmConfig)",
+          "doc": "WasmOption configures a WebAssembly plugin runtime before the module loads.",
+          "methods": [
+            {
+              "name": "WithWasmCallTimeout",
+              "signature": "func WithWasmCallTimeout(timeout time.Duration) WasmOption",
+              "doc": "WithWasmCallTimeout sets the default lifecycle and method call deadline. A non-positive duration leaves deadlines to the supplied context."
+            },
+            {
+              "name": "WithWasmCapability",
+              "signature": "func WithWasmCapability(name string, capability Capability) WasmOption",
+              "doc": "WithWasmCapability grants one named host capability to a module."
+            },
+            {
+              "name": "WithWasmCompilationCache",
+              "signature": "func WithWasmCompilationCache(cache wazero.CompilationCache) WasmOption",
+              "doc": "WithWasmCompilationCache shares compiled WebAssembly code across runtimes. The caller owns the cache and must close it after every plugin using it closes."
+            },
+            {
+              "name": "WithWasmMemoryLimit",
+              "signature": "func WithWasmMemoryLimit(bytes uint64) WasmOption",
+              "doc": "WithWasmMemoryLimit sets the maximum linear memory available to a module."
+            },
+            {
+              "name": "WithWasmPayloadLimit",
+              "signature": "func WithWasmPayloadLimit(bytes uint32) WasmOption",
+              "doc": "WithWasmPayloadLimit sets the maximum request, response, and error size."
+            },
+            {
+              "name": "WithWasmWASI",
+              "signature": "func WithWasmWASI() WasmOption",
+              "doc": "WithWasmWASI enables WASI Preview 1 with no inherited host resources."
+            },
+            {
+              "name": "WithWasmWASIArgs",
+              "signature": "func WithWasmWASIArgs(args ...string) WasmOption",
+              "doc": "WithWasmWASIArgs exposes an explicit argument vector through WASI."
+            },
+            {
+              "name": "WithWasmWASIEnv",
+              "signature": "func WithWasmWASIEnv(key, value string) WasmOption",
+              "doc": "WithWasmWASIEnv exposes one environment variable through WASI."
+            },
+            {
+              "name": "WithWasmWASIFS",
+              "signature": "func WithWasmWASIFS(filesystem fs.FS, guestPath string) WasmOption",
+              "doc": "WithWasmWASIFS mounts an explicit fs.FS at a guest path. The caller is responsible for the isolation guarantees of the supplied filesystem."
+            },
+            {
+              "name": "WithWasmWASIRandom",
+              "signature": "func WithWasmWASIRandom(reader io.Reader) WasmOption",
+              "doc": "WithWasmWASIRandom exposes an explicit random source through WASI."
+            },
+            {
+              "name": "WithWasmWASIStderr",
+              "signature": "func WithWasmWASIStderr(writer io.Writer) WasmOption",
+              "doc": "WithWasmWASIStderr exposes an explicit error stream through WASI."
+            },
+            {
+              "name": "WithWasmWASIStdin",
+              "signature": "func WithWasmWASIStdin(reader io.Reader) WasmOption",
+              "doc": "WithWasmWASIStdin exposes an explicit input stream through WASI."
+            },
+            {
+              "name": "WithWasmWASIStdout",
+              "signature": "func WithWasmWASIStdout(writer io.Writer) WasmOption",
+              "doc": "WithWasmWASIStdout exposes an explicit output stream through WASI."
+            },
+            {
+              "name": "WithWasmWASISystemClock",
+              "signature": "func WithWasmWASISystemClock() WasmOption",
+              "doc": "WithWasmWASISystemClock exposes the host wall clock, monotonic clock, and sleep."
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "WasmPlugin",
+          "signature": "type WasmPlugin struct { // contains filtered or unexported fields }",
+          "doc": "WasmPlugin is an in-process plugin isolated by a WebAssembly runtime.",
+          "methods": [
+            {
+              "name": "Call",
+              "signature": "func (plugin *WasmPlugin) Call(ctx context.Context, method string, input []byte) ([]byte, error)",
+              "doc": "Call invokes a declared guest method with an opaque byte payload."
+            },
+            {
+              "name": "CallJSON",
+              "signature": "func (plugin *WasmPlugin) CallJSON(ctx context.Context, method string, input, output any) error",
+              "doc": "CallJSON marshals input, invokes a method, and unmarshals its response."
+            },
+            {
+              "name": "Close",
+              "signature": "func (plugin *WasmPlugin) Close(ctx context.Context) error",
+              "doc": "Close stops the plugin if needed and releases its runtime."
+            },
+            {
+              "name": "Closed",
+              "signature": "func (plugin *WasmPlugin) Closed() bool",
+              "doc": "Closed reports whether the plugin runtime can accept more calls."
+            },
+            {
+              "name": "DiscoverWasm",
+              "signature": "func DiscoverWasm(ctx context.Context, directory string, options ...WasmOption) ([]*WasmPlugin, error)",
+              "doc": "DiscoverWasm loads every .wasm plugin in a directory in filename order."
+            },
+            {
+              "name": "LoadWasm",
+              "signature": "func LoadWasm(ctx context.Context, binary []byte, options ...WasmOption) (*WasmPlugin, error)",
+              "doc": "LoadWasm loads and validates a WebAssembly plugin binary."
+            },
+            {
+              "name": "LoadWasmFile",
+              "signature": "func LoadWasmFile(ctx context.Context, path string, options ...WasmOption) (*WasmPlugin, error)",
+              "doc": "LoadWasmFile loads and validates a WebAssembly plugin from disk."
+            },
+            {
+              "name": "Metadata",
+              "signature": "func (plugin *WasmPlugin) Metadata() WasmMetadata",
+              "doc": "Metadata returns a copy of the guest metadata."
+            },
+            {
+              "name": "Name",
+              "signature": "func (plugin *WasmPlugin) Name() string",
+              "doc": "Name returns the stable plugin name declared by the guest."
+            },
+            {
+              "name": "Start",
+              "signature": "func (plugin *WasmPlugin) Start() error",
+              "doc": "Start starts the guest with the configured default deadline."
+            },
+            {
+              "name": "StartContext",
+              "signature": "func (plugin *WasmPlugin) StartContext(ctx context.Context) error",
+              "doc": "StartContext starts the guest lifecycle."
+            },
+            {
+              "name": "Stop",
+              "signature": "func (plugin *WasmPlugin) Stop() error",
+              "doc": "Stop stops the guest with the configured default deadline."
+            },
+            {
+              "name": "StopContext",
+              "signature": "func (plugin *WasmPlugin) StopContext(ctx context.Context) error",
+              "doc": "StopContext stops the guest lifecycle."
             }
           ]
         }

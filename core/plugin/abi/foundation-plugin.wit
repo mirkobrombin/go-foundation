@@ -1,0 +1,30 @@
+package foundation:plugin@1.0.0;
+
+interface host {
+    call: func(
+        capability: string,
+        operation: string,
+        payload: list<u8>,
+    ) -> result<list<u8>, string>;
+}
+
+record metadata {
+    name: string,
+    version: string,
+    description: option<string>,
+    methods: list<string>,
+    capabilities: list<string>,
+    properties: list<tuple<string, string>>,
+}
+
+interface guest {
+    metadata: func() -> metadata;
+    start: func() -> result<_, string>;
+    stop: func() -> result<_, string>;
+    call: func(method: string, payload: list<u8>) -> result<list<u8>, string>;
+}
+
+world foundation-plugin {
+    import host;
+    export guest;
+}

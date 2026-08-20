@@ -53,6 +53,7 @@ configuration.
 | `foundation_packages` | Every importable package with its layer and purpose. |
 | `foundation_package_api` | The full exported API of a package: signatures, docs, struct fields with tags, methods. |
 | `foundation_symbol` | Find a symbol by name. An empty result means it does not exist in this version. |
+| `foundation_plugin_abi` | The current WebAssembly plugin contract, package API, and language-neutral document. |
 | `foundation_declaration_rules` | The exact grammar for handlers, actions, injection, contracts, binding, errors, typed APIs, layering, scheduling, generation, the workflow, and v1 migration, with the mistakes each invites. |
 | `foundation_checks` | Every diagnostic the analyzer can emit, with its cause and its fix. |
 | `foundation_install` | The commands to install the module, the CLI, and this server. |

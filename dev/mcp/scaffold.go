@@ -105,7 +105,7 @@ func orDefault(value, fallback string) string {
 func scaffoldGoMod(module string) string {
 	return fmt.Sprintf(`module %s
 
-go 1.25
+go 1.25.0
 `, module)
 }
 
